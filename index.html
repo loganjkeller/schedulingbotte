@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Botte Scheduling</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:wght@500;600;700&family=Manrope:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div>
+          <p class="eyebrow">Botte restaurant ops</p>
+          <h1>Botte Scheduling</h1>
+          <p class="sidebar-copy">
+            Weekly scheduling, staffing visibility, and live configuration for multi-location restaurant teams.
+          </p>
+        </div>
+
+        <section class="sidebar-card">
+          <label for="userSelect">Signed in as</label>
+          <select id="userSelect"></select>
+          <p id="roleSummary" class="muted"></p>
+        </section>
+
+        <nav id="navTabs" class="nav-tabs"></nav>
+
+        <section class="sidebar-card">
+          <h2>Free stack</h2>
+          <ul class="stack-list">
+            <li>Frontend: GitHub Pages</li>
+            <li>Backend: Google Apps Script</li>
+            <li>Data: Google Sheets</li>
+            <li>Today’s mode: local demo seed</li>
+          </ul>
+        </section>
+      </aside>
+
+      <main class="main-content">
+        <header class="hero">
+          <div>
+            <p class="eyebrow">Restaurant scheduling workspace</p>
+            <h2 id="pageTitle">Weekly Schedule</h2>
+            <p id="pageSubtitle" class="hero-copy"></p>
+          </div>
+          <div class="hero-actions">
+            <button id="seedButton" class="ghost-button" type="button">Reset demo data</button>
+            <button id="exportButton" class="primary-button" type="button">Export JSON snapshot</button>
+          </div>
+        </header>
+
+        <section class="stats-grid" id="statsGrid"></section>
+        <section id="alerts" class="alerts"></section>
+        <section id="viewRoot" class="view-root"></section>
+      </main>
+    </div>
+
+    <template id="emptyStateTemplate">
+      <div class="empty-state">
+        <h3>Nothing here yet</h3>
+        <p>This section will populate as soon as your data is configured.</p>
+      </div>
+    </template>
+
+    <script type="module" src="./src/app.js"></script>
+  </body>
+</html>
