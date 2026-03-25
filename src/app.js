@@ -148,8 +148,8 @@ function renderAccountSummary() {
   const currentUser = getCurrentUser();
   el.accountName.textContent = currentUser.name;
   const scope = currentUser.role === "employee"
-    ? getEmployeeByUser(currentUser)?.locations.map(getLocationName).join(", ") || "No locations"
-    : currentUser.managedLocationIds.map(getLocationName).join(", ");
+    ? getEmployeeByUser(currentUser)?.locations?.map(getLocationName).join(", ") || "No locations"
+    : (currentUser.managedLocationIds || []).map(getLocationName).join(", ") || "All assigned locations";
   el.roleSummary.textContent = `${capitalize(currentUser.role)} access · ${scope}`;
 }
 
@@ -221,8 +221,8 @@ function renderNav() {
 
 function renderHero() {
   const page = pages[state.currentView];
-  el.pageTitle.textContent = page.title;
-  el.pageSubtitle.textContent = page.subtitle || "";
+  el.pageTitle.textContent = page?.title || "";
+  el.pageSubtitle.textContent = page?.subtitle || "";
 }
 
 function renderStats() {
@@ -2129,6 +2129,9 @@ async function refreshFromRemote({ silent = false, preserveMessage = false, forc
 
 function shouldPauseLiveRefresh() {
   if (el.modalRoot.innerHTML.trim()) {
+    return true;
+  }
+  if (["settings", "people"].includes(state.currentView)) {
     return true;
   }
   const activeTag = document.activeElement?.tagName;
