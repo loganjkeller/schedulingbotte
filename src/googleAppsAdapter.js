@@ -72,6 +72,20 @@ export async function syncRemoteState(url, state, userEmail, context = {}) {
   return result;
 }
 
+export async function sendRemoteTestEmail(url, userEmail, email) {
+  const result = await postJson(url, {
+    action: "testEmail",
+    userEmail,
+    email,
+  });
+
+  if (!result.ok) {
+    throw new Error(result.error || "Unable to send test email");
+  }
+
+  return result;
+}
+
 export function buildAppsScriptPayload(state) {
   return {
     action: "syncAll",

@@ -28,7 +28,7 @@ function doGet() {
   return jsonResponse_({
     ok: true,
     service: "botte-scheduling-apps-script",
-    actions: ["healthcheck", "bootstrapSheets", "getState", "syncAll"],
+    actions: ["healthcheck", "bootstrapSheets", "getState", "syncAll", "testEmail"],
   });
 }
 
@@ -44,6 +44,19 @@ function doPost(e) {
     if (action === "bootstrapSheets") {
       bootstrapSheets_();
       return jsonResponse_({ ok: true, message: "Sheet tabs are ready." });
+    }
+
+    if (action === "testEmail") {
+      var targetEmail = request.email || Session.getEffectiveUser().getEmail();
+      sendEmailList_(
+        [targetEmail],
+        "Botte Scheduling test email",
+        buildEmailShell_(
+          "Email delivery test",
+          "<p>This is a test email from Botte Scheduling.</p><p>If you received this, email delivery is working from your Apps Script deployment.</p>"
+        )
+      );
+      return jsonResponse_({ ok: true, message: "Test email sent to " + targetEmail });
     }
 
     if (action === "getState") {
@@ -84,6 +97,18 @@ function doPost(e) {
       error: error && error.message ? error.message : String(error),
     });
   }
+}
+
+function sendTestEmail_() {
+  var targetEmail = Session.getEffectiveUser().getEmail();
+  sendEmailList_(
+    [targetEmail],
+    "Botte Scheduling test email",
+    buildEmailShell_(
+      "Email delivery test",
+      "<p>This is a test email from Botte Scheduling.</p><p>If you received this, email delivery is working from your Apps Script deployment.</p>"
+    )
+  );
 }
 
 function bootstrapSheets_() {

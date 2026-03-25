@@ -1,6 +1,7 @@
 import {
   authenticateRemoteUser,
   fetchRemoteState,
+  sendRemoteTestEmail,
   syncRemoteState,
 } from "./googleAppsAdapter.js";
 import { APP_CONFIG } from "./config.js";
@@ -639,7 +640,8 @@ function renderPeopleView() {
           <input id="employeePin" inputmode="numeric" placeholder="1234" />
         </div>
         <div class="form-field full-span" id="employeeManagedLocationsField">
-          <label>Manager access locations</label>
+          <label>User access locations</label>
+          <p class="muted">Employees use the employee locations above. Managers can control which restaurants they manage here.</p>
           ${renderLocationCheckboxGroup("employeeManagedLocations", scopedLocations, scopedLocations.slice(0, 1).map((location) => location.id))}
         </div>
         <div class="inline-form full-span">
@@ -658,8 +660,12 @@ function renderPeopleView() {
   document.querySelector("#createLogin").addEventListener("change", (event) => {
     toggleEmployeeAccessFields(event.target.value === "yes");
   });
+  document.querySelectorAll("input[name='employeeLocations']").forEach((input) => {
+    input.addEventListener("change", syncEmployeeLocationsToManagerAccess);
+  });
   document.querySelector("#employeeAccessType").addEventListener("change", () => {
     toggleEmployeeAccessFields(document.querySelector("#createLogin").value === "yes");
+    syncEmployeeLocationsToManagerAccess();
   });
   document.querySelector("#employeeForm").addEventListener("submit", handleCreateEmployee);
   toggleEmployeeAccessFields(false);
@@ -795,7 +801,9 @@ function renderSettingsView() {
       </div>
       <div class="inline-form top-gap">
         <button type="button" class="primary-button" id="saveLocationSettingsButton">Save restaurant hours</button>
+        <button type="button" class="ghost-button" id="sendTestEmailButton">Send test email</button>
       </div>
+      <p class="muted top-gap">Use test email once after redeploying Apps Script to confirm Google mail permission is active for this deployment.</p>
       <div class="summary-grid top-gap">
         ${state.appData.users
           .filter((user) => user.role !== "employee")
@@ -901,6 +909,7 @@ function renderSettingsView() {
     button.addEventListener("click", () => openUserAccessEdit(button.dataset.id));
   });
   document.querySelector("#saveLocationSettingsButton").addEventListener("click", saveLocationServiceSettings);
+  document.querySelector("#sendTestEmailButton").addEventListener("click", handleSendTestEmail);
   document.querySelector("#roleForm").addEventListener("submit", handleCreateRole);
   document.querySelector("#accessTypeForm").addEventListener("submit", handleCreateAccessType);
   document.querySelector("#userAccessType").addEventListener("change", toggleUserManagedLocationsField);
@@ -1464,6 +1473,7 @@ function toggleEmployeeAccessFields(enabled) {
   if (container) {
     container.style.opacity = enabled && accessType === "manager" ? "1" : "0.55";
   }
+  syncEmployeeLocationsToManagerAccess();
 }
 
 function toggleUserManagedLocationsField() {
@@ -1475,6 +1485,22 @@ function toggleUserManagedLocationsField() {
   if (container) {
     container.style.opacity = role === "manager" ? "1" : "0.55";
   }
+}
+
+function syncEmployeeLocationsToManagerAccess() {
+  const createLogin = document.querySelector("#createLogin")?.value === "yes";
+  const accessType = document.querySelector("#employeeAccessType")?.value;
+  const employeeLocations = getCheckedValues("employeeLocations");
+  const managerInputs = Array.from(document.querySelectorAll("input[name='employeeManagedLocations']"));
+
+  managerInputs.forEach((input) => {
+    const shouldCheck = employeeLocations.includes(input.value);
+    if (!createLogin || accessType !== "manager") {
+      input.checked = false;
+      return;
+    }
+    input.checked = shouldCheck;
+  });
 }
 
 function handleUpdateOwnProfile(event) {
@@ -1964,6 +1990,29 @@ async function syncIfLive(context = {}) {
     renderAlerts();
   } finally {
     hideLoading();
+  }
+}
+
+async function handleSendTestEmail() {
+  const backend = state.appData.meta?.backend;
+  const currentUser = getCurrentUser();
+  const targetEmail = currentUser?.email;
+
+  if (backend?.provider !== "appsScript" || !backend?.appsScriptUrl || !targetEmail) {
+    state.lastSyncMessage = "Live email test is only available when the app is connected to Apps Script with a real admin email.";
+    renderAlerts();
+    return;
+  }
+
+  try {
+    showLoading("Sending test email...");
+    const result = await sendRemoteTestEmail(backend.appsScriptUrl, currentUser.email, targetEmail);
+    state.lastSyncMessage = result.message || `Test email sent to ${targetEmail}`;
+  } catch (error) {
+    state.lastSyncMessage = `Test email failed: ${error.message}`;
+  } finally {
+    hideLoading();
+    renderAlerts();
   }
 }
 
