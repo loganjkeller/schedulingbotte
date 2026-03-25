@@ -461,6 +461,27 @@ textarea {
   gap: 14px;
 }
 
+.location-checkbox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.location-choice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--text);
+}
+
+.location-choice input {
+  margin: 0;
+}
+
 .stats-grid {
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 10px;
@@ -607,6 +628,10 @@ textarea {
 .employee-card,
 .schedule-card {
   background: rgba(255, 255, 255, 0.72);
+}
+
+.approval-card {
+  border: 1px solid rgba(180, 99, 61, 0.18);
 }
 
 .pill,

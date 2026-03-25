@@ -558,6 +558,7 @@ function renderPeopleView() {
   const user = getCurrentUser();
   const employees = getScopedEmployees(user);
   const accessTypes = getAccessTypes();
+  const scopedLocations = getScopedLocations(user);
 
   el.viewRoot.innerHTML = `
     <section class="panel">
@@ -592,9 +593,9 @@ function renderPeopleView() {
           <label for="employeeRole">Position</label>
           <select id="employeeRole">${state.appData.roles.map((role) => `<option value="${role.id}">${role.name}</option>`).join("")}</select>
         </div>
-        <div class="form-field">
-          <label for="employeeLocation">Primary location</label>
-          <select id="employeeLocation">${getScopedLocations(user).map((location) => `<option value="${location.id}">${location.name}</option>`).join("")}</select>
+        <div class="form-field full-span">
+          <label>Employee locations</label>
+          ${renderLocationCheckboxGroup("employeeLocations", scopedLocations, scopedLocations.slice(0, 1).map((location) => location.id))}
         </div>
         <div class="form-field">
           <label for="employeeRate">Hourly rate</label>
@@ -621,6 +622,10 @@ function renderPeopleView() {
           <label for="employeePin">PIN</label>
           <input id="employeePin" inputmode="numeric" placeholder="1234" />
         </div>
+        <div class="form-field full-span" id="employeeManagedLocationsField">
+          <label>Manager access locations</label>
+          ${renderLocationCheckboxGroup("employeeManagedLocations", scopedLocations, scopedLocations.slice(0, 1).map((location) => location.id))}
+        </div>
         <div class="inline-form full-span">
           <button type="submit" class="primary-button">Add employee</button>
         </div>
@@ -637,6 +642,9 @@ function renderPeopleView() {
   document.querySelector("#createLogin").addEventListener("change", (event) => {
     toggleEmployeeAccessFields(event.target.value === "yes");
   });
+  document.querySelector("#employeeAccessType").addEventListener("change", () => {
+    toggleEmployeeAccessFields(document.querySelector("#createLogin").value === "yes");
+  });
   document.querySelector("#employeeForm").addEventListener("submit", handleCreateEmployee);
   toggleEmployeeAccessFields(false);
   bindHelpButtons();
@@ -645,6 +653,7 @@ function renderPeopleView() {
 function renderRequestsView() {
   const user = getCurrentUser();
   const visibleRequests = getScopedRequests(user);
+  const approvalGroups = getScheduleApprovalGroups(user);
   const requestOptions = user.role === "employee"
     ? `
       <option value="time_off">Time off</option>
@@ -658,6 +667,20 @@ function renderRequestsView() {
     `;
 
   el.viewRoot.innerHTML = `
+    ${user.role !== "employee" ? `
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h3>Schedule approval inbox</h3>
+            <p class="muted">${user.role === "admin" ? "Approve or reject weekly plans before they go live to employees." : "Track schedules waiting for admin approval."}</p>
+          </div>
+          ${renderHelpButton("Managers can send schedules for approval. Admin approves them here before employees receive the live weekly plan.")}
+        </div>
+        <div class="list-grid">
+          ${approvalGroups.length ? approvalGroups.map((group) => renderApprovalInboxCard(group, user)).join("") : renderInlineEmpty("No weekly schedules waiting in the inbox.")}
+        </div>
+      </section>
+    ` : ""}
     <section class="panel">
       <div class="panel-header">
         <div>
@@ -676,6 +699,15 @@ function renderRequestsView() {
   if (user.role === "employee") {
     document.querySelector("#requestForm").addEventListener("submit", handleCreateRequest);
   } else {
+    document.querySelectorAll("[data-action='open-approval-group']").forEach((button) => {
+      button.addEventListener("click", () => openScheduleApprovalGroup(button.dataset.weekStartDate, button.dataset.locationId));
+    });
+    document.querySelectorAll("[data-action='approve-approval-group']").forEach((button) => {
+      button.addEventListener("click", () => approveScheduleApprovalGroup(button.dataset.weekStartDate, button.dataset.locationId));
+    });
+    document.querySelectorAll("[data-action='reject-approval-group']").forEach((button) => {
+      button.addEventListener("click", () => rejectScheduleApprovalGroup(button.dataset.weekStartDate, button.dataset.locationId));
+    });
     document.querySelectorAll("[data-action='approve-request']").forEach((button) => {
       button.addEventListener("click", () => updateRequestStatus(button.dataset.id, "approved"));
     });
@@ -847,9 +879,9 @@ function renderSettingsView() {
             ${state.appData.employees.map((employee) => `<option value="${employee.id}">${employee.name}</option>`).join("")}
           </select>
         </div>
-        <div class="form-field full-span">
-          <label for="userManagedLocations">Managed locations</label>
-          <input id="userManagedLocations" placeholder="loc-nolita,loc-soho" />
+        <div class="form-field full-span" id="userManagedLocationsField">
+          <label>Managed locations</label>
+          ${renderLocationCheckboxGroup("userManagedLocations", state.appData.locations, [])}
         </div>
         <div class="inline-form full-span">
           <button type="submit" class="primary-button">Create user</button>
@@ -858,10 +890,15 @@ function renderSettingsView() {
     </section>
   `;
 
+  document.querySelectorAll("[data-action='edit-user-access']").forEach((button) => {
+    button.addEventListener("click", () => openUserAccessEdit(button.dataset.id));
+  });
   document.querySelector("#saveLocationSettingsButton").addEventListener("click", saveLocationServiceSettings);
   document.querySelector("#roleForm").addEventListener("submit", handleCreateRole);
   document.querySelector("#accessTypeForm").addEventListener("submit", handleCreateAccessType);
+  document.querySelector("#userAccessType").addEventListener("change", toggleUserManagedLocationsField);
   document.querySelector("#userForm").addEventListener("submit", handleCreateUser);
+  toggleUserManagedLocationsField();
   bindHelpButtons();
 }
 
@@ -898,6 +935,7 @@ function renderShiftCard(shift) {
 }
 
 function renderEmployeeManagerCard(employee) {
+  const linkedUser = state.appData.users.find((item) => item.employeeId === employee.id);
   return `<article class="employee-card">
     <p class="eyebrow">${getRoleName(employee.roleId)}</p>
     <h4>${employee.name}</h4>
@@ -908,6 +946,7 @@ function renderEmployeeManagerCard(employee) {
       <span class="tag">${employee.phone || "No phone"}</span>
     </div>
     <p class="kpi-note">${employee.email || "No email"} · ${employee.positionLabel || getRoleName(employee.roleId)}</p>
+    ${linkedUser ? `<p class="kpi-note">Access: ${capitalize(linkedUser.role)}${linkedUser.role === "manager" ? ` · ${linkedUser.managedLocationIds.map(getLocationName).join(", ")}` : ""}</p>` : ""}
     <div class="inline-form top-gap">
       <button type="button" class="small-button" data-action="edit-employee" data-id="${employee.id}">Edit</button>
       <button type="button" class="ghost-button" data-action="delete-employee" data-id="${employee.id}">Remove</button>
@@ -999,6 +1038,26 @@ function renderRequestCard(request) {
   </article>`;
 }
 
+function renderApprovalInboxCard(group, user) {
+  return `<article class="list-card approval-card">
+    <div class="pill-row">
+      <span class="pill warning">${group.statusLabel}</span>
+      <span class="pill">${group.shiftCount} shifts</span>
+      <span class="pill">${group.totalHours.toFixed(1)}h</span>
+    </div>
+    <strong>${group.locationName}</strong>
+    <p class="muted">${formatWeekRange(group.weekStartDate, addDaysToIso(group.weekStartDate, 6))}</p>
+    <p class="kpi-note">$${group.totalCost.toFixed(2)} estimated labor</p>
+    <div class="inline-form top-gap">
+      <button type="button" class="ghost-button" data-action="open-approval-group" data-week-start-date="${group.weekStartDate}" data-location-id="${group.locationId}">Open week</button>
+      ${user.role === "admin"
+        ? `<button type="button" class="small-button" data-action="approve-approval-group" data-week-start-date="${group.weekStartDate}" data-location-id="${group.locationId}">Approve</button>
+           <button type="button" class="ghost-button" data-action="reject-approval-group" data-week-start-date="${group.weekStartDate}" data-location-id="${group.locationId}">Reject</button>`
+        : ""}
+    </div>
+  </article>`;
+}
+
 function renderLocationSettingsCard(location) {
   const config = state.appData.locationSettings.find((item) => item.locationId === location.id);
   return `<article class="summary-card">
@@ -1032,6 +1091,9 @@ function renderUserAccessCard(user) {
     <h3>${user.name}</h3>
     <p class="muted">${user.email}</p>
     <p class="kpi-note">${(user.managedLocationIds || []).map(getLocationName).join(", ") || "No assigned locations"}</p>
+    <div class="inline-form top-gap">
+      <button type="button" class="small-button" data-action="edit-user-access" data-id="${user.id}">Edit access</button>
+    </div>
   </article>`;
 }
 
@@ -1088,6 +1150,18 @@ function renderEmployeeRequestForm() {
       <button type="submit" class="primary-button">Send request</button>
     </div>
   </form>`;
+}
+
+function renderLocationCheckboxGroup(name, locations, selectedIds = []) {
+  const selected = new Set(selectedIds);
+  return `<div class="location-checkbox-grid">
+    ${locations.map((location) => `
+      <label class="location-choice">
+        <input type="checkbox" name="${name}" value="${location.id}" ${selected.has(location.id) ? "checked" : ""} />
+        <span>${location.name}</span>
+      </label>
+    `).join("")}
+  </div>`;
 }
 
 function renderInlineEmpty(text) {
@@ -1158,13 +1232,12 @@ function handleScheduleDrop(event) {
 
 function publishVisibleShifts() {
   const user = getCurrentUser();
-  const sourceStatus = user.role === "admin" ? "pending_approval" : "draft";
-  const targetStatus = user.role === "admin" ? "published" : "pending_approval";
-  state.appData.shifts = state.appData.shifts.map((shift) =>
-    getVisibleShifts(user).some((visible) => visible.id === shift.id && visible.status === sourceStatus)
-      ? { ...shift, status: targetStatus }
-      : shift
-  );
+  updateScheduleGroupStatus({
+    weekStartDate: state.weekStartDate,
+    locationId: state.filters.locationId,
+    fromStatus: user.role === "admin" ? "pending_approval" : "draft",
+    toStatus: user.role === "admin" ? "published" : "pending_approval",
+  });
   persistAndRender(
     user.role === "admin" ? "Schedule approved and published" : "Schedule submitted for approval",
     {
@@ -1177,11 +1250,13 @@ function publishVisibleShifts() {
 
 function rejectVisiblePendingShifts() {
   openReasonModal("Reject schedule", "Reason for rejection", (reason) => {
-    state.appData.shifts = state.appData.shifts.map((shift) =>
-      getVisibleShifts(getCurrentUser()).some((visible) => visible.id === shift.id && visible.status === "pending_approval")
-        ? { ...shift, status: "draft", rejectionReason: reason }
-        : shift
-    );
+    updateScheduleGroupStatus({
+      weekStartDate: state.weekStartDate,
+      locationId: state.filters.locationId,
+      fromStatus: "pending_approval",
+      toStatus: "draft",
+      reason,
+    });
     persistAndRender("Schedule sent back to draft", {
       type: "schedule_rejected",
       weekStartDate: state.weekStartDate,
@@ -1220,16 +1295,21 @@ function handleCreateEmployee(event) {
   event.preventDefault();
   const name = document.querySelector("#employeeName").value.trim();
   const email = document.querySelector("#employeeEmail").value.trim();
-  const locationId = document.querySelector("#employeeLocation").value;
+  const locationIds = getCheckedValues("employeeLocations");
   const createLogin = document.querySelector("#createLogin").value === "yes";
   const accessType = document.querySelector("#employeeAccessType").value;
   const pin = document.querySelector("#employeePin").value.trim() || "0000";
-  if (!name || !locationId) {
-    window.alert("Add at least the employee name and location.");
+  const managedLocationIds = accessType === "manager" ? getCheckedValues("employeeManagedLocations") : [];
+  if (!name || !locationIds.length) {
+    window.alert("Add at least the employee name and one location.");
     return;
   }
   if (createLogin && (!email || !pin)) {
     window.alert("To create user access, add email and PIN.");
+    return;
+  }
+  if (createLogin && accessType === "manager" && !managedLocationIds.length) {
+    window.alert("Select at least one manager access location.");
     return;
   }
   const employee = {
@@ -1239,7 +1319,7 @@ function handleCreateEmployee(event) {
     phone: "",
     roleId: document.querySelector("#employeeRole").value,
     positionLabel: getRoleName(document.querySelector("#employeeRole").value),
-    locations: [locationId],
+    locations: locationIds,
     hourlyRate: Number(document.querySelector("#employeeRate").value),
     weeklyHoursTarget: Number(document.querySelector("#employeeTargetHours").value),
     tags: [],
@@ -1258,7 +1338,7 @@ function handleCreateEmployee(event) {
       email: employee.email,
       role: accessType,
       employeeId: employee.id,
-      managedLocationIds: accessType === "manager" ? [locationId] : [],
+      managedLocationIds,
     });
   }
   persistAndRender(`Added ${employee.name}`, {
@@ -1307,13 +1387,14 @@ function handleCreateUser(event) {
   const pin = document.querySelector("#userPin").value.trim();
   const role = document.querySelector("#userAccessType").value;
   const employeeId = document.querySelector("#userEmployeeLink").value;
-  const managedLocationIds = document.querySelector("#userManagedLocations").value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
+  const managedLocationIds = role === "manager" ? getCheckedValues("userManagedLocations") : [];
 
   if (!name || !lastName || !pin) {
     window.alert("Add user name, last name, and PIN.");
+    return;
+  }
+  if (role === "manager" && !managedLocationIds.length) {
+    window.alert("Select at least one managed location.");
     return;
   }
 
@@ -1337,6 +1418,25 @@ function toggleEmployeeAccessFields(enabled) {
       field.disabled = !enabled;
     }
   });
+  const accessType = document.querySelector("#employeeAccessType")?.value;
+  document.querySelectorAll("input[name='employeeManagedLocations']").forEach((field) => {
+    field.disabled = !enabled || accessType !== "manager";
+  });
+  const container = document.querySelector("#employeeManagedLocationsField");
+  if (container) {
+    container.style.opacity = enabled && accessType === "manager" ? "1" : "0.55";
+  }
+}
+
+function toggleUserManagedLocationsField() {
+  const role = document.querySelector("#userAccessType")?.value;
+  document.querySelectorAll("input[name='userManagedLocations']").forEach((field) => {
+    field.disabled = role !== "manager";
+  });
+  const container = document.querySelector("#userManagedLocationsField");
+  if (container) {
+    container.style.opacity = role === "manager" ? "1" : "0.55";
+  }
 }
 
 function handleUpdateOwnProfile(event) {
@@ -1410,6 +1510,8 @@ function openEmployeeEdit(employeeId) {
   if (!employee) {
     return;
   }
+  const user = getCurrentUser();
+  const scopedLocations = getScopedLocations(user);
   el.modalRoot.innerHTML = `
     <div class="modal-overlay" data-close-modal="true">
       <div class="modal-card" role="dialog" aria-modal="true" aria-label="Edit employee">
@@ -1436,6 +1538,10 @@ function openEmployeeEdit(employeeId) {
             <label for="editEmployeePosition">Position label</label>
             <input id="editEmployeePosition" value="${escapeHtml(employee.positionLabel || getRoleName(employee.roleId))}" />
           </div>
+          <div class="form-field full-span">
+            <label>Employee locations</label>
+            ${renderLocationCheckboxGroup("editEmployeeLocations", scopedLocations, employee.locations || [])}
+          </div>
           <div class="inline-form full-span">
             <button type="button" class="ghost-button" id="cancelEmployeeEdit">Cancel</button>
             <button type="submit" class="primary-button">Save changes</button>
@@ -1451,12 +1557,14 @@ function openEmployeeEdit(employeeId) {
     const nextEmail = document.querySelector("#editEmployeeEmail").value.trim();
     const nextPhone = document.querySelector("#editEmployeePhone").value.trim();
     const nextPosition = document.querySelector("#editEmployeePosition").value.trim();
+    const nextLocations = getCheckedValues("editEmployeeLocations");
     replaceEmployee({
       ...employee,
       name: nextName,
       email: nextEmail,
       phone: nextPhone,
       positionLabel: nextPosition,
+      locations: nextLocations.length ? nextLocations : employee.locations,
     });
     state.appData.users = state.appData.users.map((item) =>
       item.employeeId === employeeId
@@ -1647,7 +1755,7 @@ function bindModalClose() {
       }
     });
   });
-  el.modalRoot.querySelectorAll("#closeModalButton, #cancelEmployeeEdit, #cancelShiftEdit").forEach((button) => {
+  el.modalRoot.querySelectorAll("#closeModalButton, #cancelEmployeeEdit, #cancelShiftEdit, #cancelReason, #cancelUserAccessEdit").forEach((button) => {
     button.addEventListener("click", closeModal);
   });
 }
@@ -1683,6 +1791,95 @@ function openReasonModal(title, label, onSave) {
     const reason = document.querySelector("#modalReason").value.trim();
     closeModal();
     onSave(reason);
+  });
+}
+
+function openUserAccessEdit(userId) {
+  const user = state.appData.users.find((item) => item.id === userId);
+  if (!user) {
+    return;
+  }
+  el.modalRoot.innerHTML = `
+    <div class="modal-overlay" data-close-modal="true">
+      <div class="modal-card" role="dialog" aria-modal="true" aria-label="Edit access">
+        <div class="panel-header">
+          <div><h3>Edit access</h3></div>
+          <button type="button" class="icon-button" id="closeModalButton">×</button>
+        </div>
+        <form id="userAccessEditForm" class="form-grid">
+          <div class="form-field">
+            <label for="editUserName">Name</label>
+            <input id="editUserName" value="${escapeHtml(user.name || "")}" />
+          </div>
+          <div class="form-field">
+            <label for="editUserEmail">Email</label>
+            <input id="editUserEmail" value="${escapeHtml(user.email || "")}" />
+          </div>
+          <div class="form-field">
+            <label for="editUserLastName">Last name</label>
+            <input id="editUserLastName" value="${escapeHtml(user.lastName || "")}" />
+          </div>
+          <div class="form-field">
+            <label for="editUserPin">PIN</label>
+            <input id="editUserPin" value="${escapeHtml(user.pin || "")}" />
+          </div>
+          <div class="form-field">
+            <label for="editUserAccessType">Access type</label>
+            <select id="editUserAccessType">
+              ${getAccessTypes().map((type) => `<option value="${type.id}" ${type.id === user.role ? "selected" : ""}>${type.name}</option>`).join("")}
+            </select>
+          </div>
+          <div class="form-field">
+            <label for="editUserEmployeeLink">Linked employee</label>
+            <select id="editUserEmployeeLink">
+              <option value="">None</option>
+              ${state.appData.employees.map((employee) => `<option value="${employee.id}" ${employee.id === user.employeeId ? "selected" : ""}>${employee.name}</option>`).join("")}
+            </select>
+          </div>
+          <div class="form-field full-span" id="editUserManagedLocationsField">
+            <label>Managed locations</label>
+            ${renderLocationCheckboxGroup("editUserManagedLocations", state.appData.locations, user.managedLocationIds || [])}
+          </div>
+          <div class="inline-form full-span">
+            <button type="button" class="ghost-button" id="cancelUserAccessEdit">Cancel</button>
+            <button type="submit" class="primary-button">Save access</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+  bindModalClose();
+  const syncEditMode = () => {
+    const role = document.querySelector("#editUserAccessType")?.value;
+    document.querySelectorAll("input[name='editUserManagedLocations']").forEach((field) => {
+      field.disabled = role !== "manager";
+    });
+    const container = document.querySelector("#editUserManagedLocationsField");
+    if (container) {
+      container.style.opacity = role === "manager" ? "1" : "0.55";
+    }
+  };
+  syncEditMode();
+  document.querySelector("#editUserAccessType").addEventListener("change", syncEditMode);
+  document.querySelector("#userAccessEditForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const role = document.querySelector("#editUserAccessType").value;
+    state.appData.users = state.appData.users.map((item) =>
+      item.id === userId
+        ? {
+            ...item,
+            name: document.querySelector("#editUserName").value.trim(),
+            email: document.querySelector("#editUserEmail").value.trim(),
+            lastName: document.querySelector("#editUserLastName").value.trim(),
+            pin: document.querySelector("#editUserPin").value.trim(),
+            role,
+            employeeId: document.querySelector("#editUserEmployeeLink").value,
+            managedLocationIds: role === "manager" ? getCheckedValues("editUserManagedLocations") : [],
+          }
+        : item
+    );
+    closeModal();
+    persistAndRender("Access updated", { type: "user_created", email: user.email, role });
   });
 }
 
@@ -1731,6 +1928,101 @@ function saveLocationServiceSettings() {
   persistAndRender("Restaurant hours saved", {
     type: "settings_updated",
     locationIds: state.appData.locationSettings.map((setting) => setting.locationId),
+  });
+}
+
+function getCheckedValues(name) {
+  return Array.from(document.querySelectorAll(`input[name='${name}']:checked`)).map((input) => input.value);
+}
+
+function getScheduleApprovalGroups(user) {
+  const visibleStatuses = user.role === "admin" ? ["pending_approval"] : ["pending_approval"];
+  const scopedLocations = new Set(getScopedLocations(user).map((location) => location.id));
+  const grouped = new Map();
+
+  state.appData.shifts
+    .filter((shift) => scopedLocations.has(shift.locationId) && visibleStatuses.includes(shift.status))
+    .forEach((shift) => {
+      const weekStartDate = getWeekDates(shift.date)[0];
+      const key = `${weekStartDate}__${shift.locationId}`;
+      const employee = getEmployee(shift.employeeId);
+      const existing = grouped.get(key) || {
+        weekStartDate,
+        locationId: shift.locationId,
+        locationName: getLocationName(shift.locationId),
+        shiftCount: 0,
+        totalHours: 0,
+        totalCost: 0,
+        statusLabel: shift.status === "pending_approval" ? "Waiting approval" : capitalize(shift.status),
+      };
+      const shiftHours = calculateHours(shift.start, shift.end);
+      existing.shiftCount += 1;
+      existing.totalHours += shiftHours;
+      existing.totalCost += shiftHours * Number(employee?.hourlyRate || 0);
+      grouped.set(key, existing);
+    });
+
+  return Array.from(grouped.values()).sort((a, b) =>
+    a.weekStartDate.localeCompare(b.weekStartDate) || a.locationName.localeCompare(b.locationName)
+  );
+}
+
+function openScheduleApprovalGroup(weekStartDate, locationId) {
+  state.weekStartDate = weekStartDate;
+  state.filters.locationId = locationId;
+  state.currentView = "schedule";
+  render();
+}
+
+function approveScheduleApprovalGroup(weekStartDate, locationId) {
+  state.weekStartDate = weekStartDate;
+  state.filters.locationId = locationId;
+  updateScheduleGroupStatus({
+    weekStartDate,
+    locationId,
+    fromStatus: "pending_approval",
+    toStatus: "published",
+  });
+  persistAndRender("Schedule approved and published", {
+    type: "schedule_approved",
+    weekStartDate,
+    locationId,
+  });
+}
+
+function rejectScheduleApprovalGroup(weekStartDate, locationId) {
+  openReasonModal("Reject schedule", "Reason for rejection", (reason) => {
+    updateScheduleGroupStatus({
+      weekStartDate,
+      locationId,
+      fromStatus: "pending_approval",
+      toStatus: "draft",
+      reason,
+    });
+    persistAndRender("Schedule sent back to draft", {
+      type: "schedule_rejected",
+      weekStartDate,
+      locationId,
+      reason,
+    });
+  });
+}
+
+function updateScheduleGroupStatus({ weekStartDate, locationId, fromStatus, toStatus, reason = "" }) {
+  const weekDates = new Set(getWeekDates(weekStartDate));
+  state.appData.shifts = state.appData.shifts.map((shift) => {
+    const matches =
+      weekDates.has(shift.date) &&
+      shift.locationId === locationId &&
+      (fromStatus ? shift.status === fromStatus : true);
+    if (!matches) {
+      return shift;
+    }
+    return {
+      ...shift,
+      status: toStatus,
+      rejectionReason: reason || "",
+    };
   });
 }
 

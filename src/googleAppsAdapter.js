@@ -57,10 +57,11 @@ export async function authenticateRemoteUser(url, lastName, pin) {
   return result;
 }
 
-export async function syncRemoteState(url, state, userEmail) {
+export async function syncRemoteState(url, state, userEmail, context = {}) {
   const result = await postJson(url, {
     action: "syncAll",
     userEmail,
+    context,
     payload: buildAppsScriptPayload(state).payload,
   });
 

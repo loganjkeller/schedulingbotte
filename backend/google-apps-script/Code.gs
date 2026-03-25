@@ -63,10 +63,16 @@ function doPost(e) {
     if (action === "syncAll") {
       var syncAccess = getUserAccess_(request.userEmail);
       if (syncAccess.role !== "admin") {
+        if (request.context && isAllowedNonAdminAction_(request.context.type)) {
+          writeFullState_(request.payload || {});
+          notifyByContext_(request.payload || {}, request.context || {});
+          return jsonResponse_({ ok: true, message: "Google Sheets updated." });
+        }
         return jsonResponse_({ ok: false, error: "Only admins can sync all scheduling data." });
       }
 
       writeFullState_(request.payload || {});
+      notifyByContext_(request.payload || {}, request.context || {});
       return jsonResponse_({ ok: true, message: "Google Sheets updated." });
     }
 
@@ -97,22 +103,23 @@ function buildStateForUser_(access) {
   }
 
   if (isEmployee) {
+    var employeeLocations = getEmployeeLocations_(state.employees, access.employeeId);
     return {
       meta: state.meta,
       locations: state.locations.filter(function (row) {
-        return intersects_(row.id ? [row.id] : [], getEmployeeLocations_(state.employees, access.employeeId));
+        return intersects_(row.id ? [row.id] : [], employeeLocations);
       }),
       roles: state.roles,
       accessTypes: state.accessTypes,
       employees: state.employees.filter(function (row) {
-        return row.id === access.employeeId;
+        return intersects_(row.locations, employeeLocations);
       }),
       shifts: state.shifts.filter(function (row) {
-        return row.employeeId === access.employeeId;
+        return employeeLocations.indexOf(row.locationId) !== -1 && row.status === "published";
       }),
       templates: [],
       locationSettings: state.locationSettings.filter(function (row) {
-        return getEmployeeLocations_(state.employees, access.employeeId).indexOf(row.locationId) !== -1;
+        return employeeLocations.indexOf(row.locationId) !== -1;
       }),
       users: state.users.filter(function (row) {
         return row.email === access.email;
@@ -190,6 +197,24 @@ function readFullState_() {
     users: readRows_(spreadsheet.getSheetByName("users"), SHEET_CONFIG.users),
     requests: readRows_(spreadsheet.getSheetByName("requests"), SHEET_CONFIG.requests),
   };
+}
+
+function isAllowedNonAdminAction_(type) {
+  return [
+    "employee_request_created",
+    "profile_or_availability_updated",
+    "settings_updated",
+    "request_status_changed",
+    "shift_draft_updated",
+    "schedule_submitted",
+    "schedule_approved",
+    "schedule_rejected",
+    "employee_created",
+    "employee_and_user_created",
+    "employee_updated",
+    "employee_removed",
+    "user_created",
+  ].indexOf(type) !== -1;
 }
 
 function getUserAccess_(email) {
@@ -374,4 +399,283 @@ function sanitizeUser_(user) {
     employeeId: user.employeeId,
     managedLocationIds: user.managedLocationIds || [],
   };
+}
+
+function notifyByContext_(payload, context) {
+  if (!context || !context.type) {
+    return;
+  }
+
+  var employees = payload.employees || [];
+  var users = payload.users || [];
+  var requests = payload.requests || [];
+  var shifts = payload.shifts || [];
+  var locations = payload.locations || [];
+
+  if (context.type === "employee_request_created") {
+    var requestEmployee = findEmployeeById_(employees, context.employeeId);
+    var requestManagers = managerAndAdminEmailsForLocations_(users, requestEmployee.locations || []);
+    sendEmailList_(
+      requestManagers,
+      "New employee request",
+      "<p><strong>" + safe_(requestEmployee.name) + "</strong> submitted a " + safe_(formatRequestType_(context.requestType)) + " request.</p>" +
+        "<p>Review it in Botte Scheduling.</p>"
+    );
+    return;
+  }
+
+  if (context.type === "profile_or_availability_updated") {
+    var availabilityEmployee = findEmployeeById_(employees, context.employeeId);
+    var availabilityManagers = managerAndAdminEmailsForLocations_(users, availabilityEmployee.locations || []);
+    sendEmailList_(
+      availabilityManagers,
+      "Employee profile or availability updated",
+      "<p><strong>" + safe_(availabilityEmployee.name) + "</strong> updated profile or availability information.</p>" +
+        "<p>Open the employee record or requests inbox to review the latest changes.</p>"
+    );
+    return;
+  }
+
+  if (context.type === "settings_updated") {
+    var settingsRecipients = managerAndAdminEmailsForLocations_(users, context.locationIds || []);
+    sendEmailList_(
+      settingsRecipients,
+      "Restaurant settings updated",
+      "<p>Restaurant service settings were updated in Botte Scheduling.</p>" +
+        "<p>Locations: " + safe_((context.locationIds || []).map(function (id) {
+          return findLocationName_(locations, id);
+        }).join(", ")) + "</p>"
+    );
+    return;
+  }
+
+  if (context.type === "request_status_changed") {
+    var request = findRequestById_(requests, context.requestId);
+    var employee = findEmployeeById_(employees, request.employeeId);
+    sendEmailList_(
+      [employee.email],
+      "Request " + safe_(capitalizeText_(context.status)),
+      "<p>Your " + safe_(formatRequestType_(request.type)) + " request has been <strong>" + safe_(context.status) + "</strong>.</p>" +
+        "<p><strong>Dates:</strong> " + safe_(request.startDate || "Open") +
+        (request.endDate ? " to " + safe_(request.endDate) : "") + "</p>" +
+        "<p>" + safe_(request.note || "") + "</p>"
+    );
+    return;
+  }
+
+  if (context.type === "schedule_submitted") {
+    var admins = getRoleEmails_(users, "admin");
+    sendEmailList_(
+      admins,
+      "Schedule waiting for approval",
+      buildScheduleEmailHtml_(payload, context, "A manager submitted a weekly plan for approval.")
+    );
+    return;
+  }
+
+  if (context.type === "schedule_approved") {
+    var managersAndAdmins = managerAndAdminEmailsForLocations_(users, [context.locationId]);
+    sendEmailList_(
+      managersAndAdmins,
+      "Schedule approved and live",
+      buildScheduleEmailHtml_(payload, context, "The weekly plan has been approved and is now live.")
+    );
+    sendEmployeeScheduleEmails_(payload, context);
+    return;
+  }
+
+  if (context.type === "schedule_rejected") {
+    var recipients = managerAndAdminEmailsForLocations_(users, [context.locationId]);
+    sendEmailList_(
+      recipients,
+      "Schedule rejected",
+      buildScheduleEmailHtml_(payload, context, "The weekly plan was rejected.") +
+        "<p><strong>Reason:</strong> " + safe_(context.reason || "No reason provided.") + "</p>"
+    );
+  }
+}
+
+function sendEmployeeScheduleEmails_(payload, context) {
+  var weekShifts = getWeekLocationShifts_(payload.shifts || [], context.weekStartDate, context.locationId).filter(function (shift) {
+    return shift.status === "published";
+  });
+  var grouped = {};
+  weekShifts.forEach(function (shift) {
+    grouped[shift.employeeId] = grouped[shift.employeeId] || [];
+    grouped[shift.employeeId].push(shift);
+  });
+
+  Object.keys(grouped).forEach(function (employeeId) {
+    var employee = findEmployeeById_(payload.employees || [], employeeId);
+    var shifts = grouped[employeeId];
+    var totalHours = shifts.reduce(function (sum, shift) {
+      return sum + calculateHours_(shift.start, shift.end);
+    }, 0);
+    var html = buildEmployeeWeeklyScheduleHtml_(payload, context, employee, shifts, totalHours);
+    sendEmailList_([employee.email], "Your weekly schedule", html);
+  });
+}
+
+function buildScheduleEmailHtml_(payload, context, intro) {
+  var locationName = findLocationName_(payload.locations || [], context.locationId);
+  var weekShifts = getWeekLocationShifts_(payload.shifts || [], context.weekStartDate, context.locationId);
+  var totalHours = weekShifts.reduce(function (sum, shift) {
+    return sum + calculateHours_(shift.start, shift.end);
+  }, 0);
+  var totalCost = weekShifts.reduce(function (sum, shift) {
+    var employee = findEmployeeById_(payload.employees || [], shift.employeeId);
+    return sum + calculateHours_(shift.start, shift.end) * Number(employee.hourlyRate || 0);
+  }, 0);
+
+  return "<p>" + safe_(intro) + "</p><p><strong>Location:</strong> " + safe_(locationName) + "</p>" +
+    "<p><strong>Week:</strong> " + safe_(context.weekStartDate) + "</p>" +
+    "<p><strong>Total scheduled hours:</strong> " + totalHours.toFixed(1) + "</p>" +
+    "<p><strong>Total labor cost:</strong> $" + totalCost.toFixed(2) + "</p>" +
+    buildScheduleBreakdownHtml_(payload, weekShifts);
+}
+
+function buildScheduleBreakdownHtml_(payload, weekShifts) {
+  if (!weekShifts.length) {
+    return "<p>No shifts in this weekly plan.</p>";
+  }
+
+  var grouped = {};
+  weekShifts.forEach(function (shift) {
+    grouped[shift.date] = grouped[shift.date] || [];
+    grouped[shift.date].push(shift);
+  });
+
+  return Object.keys(grouped).sort().map(function (date) {
+    return "<h4>" + safe_(formatDateLabel_(date)) + "</h4><ul>" +
+      grouped[date].map(function (shift) {
+        var employee = findEmployeeById_(payload.employees || [], shift.employeeId);
+        var shiftCost = calculateHours_(shift.start, shift.end) * Number(employee.hourlyRate || 0);
+        return "<li><strong>" + safe_(employee.name) + "</strong> · " +
+          safe_(shift.start) + " - " + safe_(shift.end) + " · $" + shiftCost.toFixed(2) +
+          " · " + safe_(capitalizeText_(shift.status)) + "</li>";
+      }).join("") + "</ul>";
+  }).join("");
+}
+
+function buildEmployeeWeeklyScheduleHtml_(payload, context, employee, shifts, totalHours) {
+  return "<p>Your weekly schedule is now live.</p>" +
+    "<p><strong>Week:</strong> " + safe_(context.weekStartDate) + "</p>" +
+    "<p><strong>Total hours:</strong> " + totalHours.toFixed(1) + "</p>" +
+    "<ul>" + shifts.sort(function (a, b) {
+      return a.date.localeCompare(b.date) || a.start.localeCompare(b.start);
+    }).map(function (shift) {
+      return "<li>" + safe_(formatDateLabel_(shift.date)) + " · " +
+        safe_(findLocationName_(payload.locations || [], shift.locationId)) + " · " +
+        safe_(shift.start) + " - " + safe_(shift.end) + "</li>";
+    }).join("") + "</ul>" +
+    "<p>Open Botte Scheduling anytime to review the full team schedule.</p>";
+}
+
+function getWeekLocationShifts_(shifts, weekStartDate, locationId) {
+  if (!weekStartDate || !locationId) {
+    return [];
+  }
+  var start = new Date(weekStartDate + "T12:00:00");
+  var dates = [];
+  for (var i = 0; i < 7; i += 1) {
+    var current = new Date(start);
+    current.setDate(start.getDate() + i);
+    dates.push(current.toISOString().slice(0, 10));
+  }
+  return shifts.filter(function (shift) {
+    return shift.locationId === locationId && dates.indexOf(shift.date) !== -1;
+  });
+}
+
+function managerAndAdminEmailsForLocations_(users, locationIds) {
+  var emails = [];
+  users.forEach(function (user) {
+    var isAdmin = user.role === "admin";
+    var isManager = user.role === "manager" && intersects_(user.managedLocationIds || [], locationIds || []);
+    if ((isAdmin || isManager) && user.email) {
+      emails.push(user.email);
+    }
+  });
+  return unique_(emails);
+}
+
+function getRoleEmails_(users, role) {
+  return unique_(users.filter(function (user) {
+    return user.role === role && user.email;
+  }).map(function (user) {
+    return user.email;
+  }));
+}
+
+function sendEmailList_(emails, subject, htmlBody) {
+  var recipients = unique_(emails || []).filter(Boolean);
+  if (!recipients.length) {
+    return;
+  }
+  MailApp.sendEmail({
+    to: recipients.join(","),
+    subject: subject,
+    htmlBody: htmlBody,
+  });
+}
+
+function findEmployeeById_(employees, id) {
+  return employees.filter(function (item) {
+    return item.id === id;
+  })[0] || {};
+}
+
+function findRequestById_(requests, id) {
+  return requests.filter(function (item) {
+    return item.id === id;
+  })[0] || {};
+}
+
+function findLocationName_(locations, id) {
+  var match = locations.filter(function (item) {
+    return item.id === id;
+  })[0];
+  return match ? match.name : id;
+}
+
+function calculateHours_(start, end) {
+  var startParts = String(start).split(":");
+  var endParts = String(end).split(":");
+  var total = Number(endParts[0]) + Number(endParts[1]) / 60 - (Number(startParts[0]) + Number(startParts[1]) / 60);
+  if (total < 0) {
+    total += 24;
+  }
+  return total;
+}
+
+function unique_(items) {
+  var seen = {};
+  return items.filter(function (item) {
+    if (seen[item]) {
+      return false;
+    }
+    seen[item] = true;
+    return true;
+  });
+}
+
+function safe_(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function capitalizeText_(value) {
+  var text = String(value || "");
+  return text ? text.charAt(0).toUpperCase() + text.slice(1).replace(/_/g, " ") : "";
+}
+
+function formatRequestType_(value) {
+  return capitalizeText_(String(value || "").replace(/_/g, " "));
+}
+
+function formatDateLabel_(isoDate) {
+  var date = new Date(isoDate + "T12:00:00");
+  return Utilities.formatDate(date, Session.getScriptTimeZone(), "EEE MMM d");
 }
