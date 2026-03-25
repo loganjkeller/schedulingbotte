@@ -1075,7 +1075,7 @@ function renderApprovalInboxCard(group, user) {
 }
 
 function renderLocationSettingsCard(location) {
-  const config = state.appData.locationSettings.find((item) => item.locationId === location.id);
+  const config = getLocationSetting(location.id);
   return `<article class="summary-card">
     <h3>${location.name}</h3>
     <p class="muted">${location.city}</p>
@@ -1966,14 +1966,15 @@ async function syncIfLive(context = {}) {
 
 function saveLocationServiceSettings() {
   const inputs = document.querySelectorAll("[data-setting-location]");
-  state.appData.locationSettings = state.appData.locationSettings.map((setting) => {
+  state.appData.locationSettings = state.appData.locations.map((location) => {
+    const base = getLocationSetting(location.id);
     const updates = {};
     inputs.forEach((input) => {
-      if (input.dataset.settingLocation === setting.locationId) {
+      if (input.dataset.settingLocation === location.id) {
         updates[input.dataset.settingKey] = input.value;
       }
     });
-    return { ...setting, ...updates };
+    return { ...base, ...updates };
   });
   persistAndRender("Restaurant hours saved", {
     type: "settings_updated",
@@ -2398,6 +2399,20 @@ function getRoleName(roleId) {
 
 function getLocationName(locationId) {
   return state.appData.locations.find((location) => location.id === locationId)?.name ?? locationId;
+}
+
+function getLocationSetting(locationId) {
+  return state.appData.locationSettings.find((item) => item.locationId === locationId) ?? {
+    locationId,
+    weekStartsOn: "Monday",
+    publishCutoffHours: 48,
+    overtimeWarningHours: 40,
+    approvalRequired: true,
+    lunchOpen: "",
+    lunchClose: "",
+    dinnerOpen: "",
+    dinnerClose: "",
+  };
 }
 
 function humanizeRequestType(type) {
