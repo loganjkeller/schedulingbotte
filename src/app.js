@@ -934,7 +934,8 @@ function renderDayColumn(date, user, activeLocationId) {
 
 function renderShiftCard(shift) {
   const employee = getEmployee(shift.employeeId);
-  return `<article class="shift-card">
+  const warnings = getShiftConflictWarnings(shift);
+  return `<article class="shift-card ${warnings.length ? "has-conflict" : ""}">
     <div class="shift-head">
       <strong>${employee?.name || "Unknown employee"}</strong>
       <div class="inline-form">
@@ -947,6 +948,7 @@ function renderShiftCard(shift) {
       <span class="pill">${shift.start} - ${shift.end}</span>
       <span class="pill ${shift.status === "published" ? "accent" : "warning"}">${capitalize(shift.status)}</span>
     </div>
+    ${warnings.length ? `<div class="warning-stack top-gap">${warnings.map((warning) => `<p class="shift-warning">${warning}</p>`).join("")}</div>` : ""}
   </article>`;
 }
 
@@ -984,6 +986,7 @@ function renderStaffPlannerCard(employee, activeLocationId) {
   const pendingAvailability = state.appData.requests.find(
     (request) => request.employeeId === employee.id && request.type === "swap_shift" && request.status === "pending"
   );
+  const plannerWarnings = getEmployeeWeekPlannerWarnings(employee.id, activeLocationId, state.weekStartDate);
   return `<article class="staff-card" draggable="true" data-employee-id="${employee.id}">
     <div class="shift-head">
       <strong>${employee.name}</strong>
@@ -992,6 +995,7 @@ function renderStaffPlannerCard(employee, activeLocationId) {
     <p class="muted">${employee.positionLabel || getRoleName(employee.roleId)}</p>
     <p class="kpi-note">Availability: ${formatAvailabilitySummary(employee.availability || [])}</p>
     ${pendingAvailability ? `<p class="staff-note">Pending swap request: ${pendingAvailability.note}</p>` : ""}
+    ${plannerWarnings.length ? `<div class="warning-stack top-gap">${plannerWarnings.map((warning) => `<p class="staff-warning">${warning}</p>`).join("")}</div>` : ""}
   </article>`;
 }
 
@@ -1161,7 +1165,8 @@ function renderEmployeeRequestForm() {
 }
 
 function renderAvailabilityGrid(selectedAvailability) {
-  return `<div class="availability-toolbar">
+  return `<div class="availability-surface">
+    <div class="availability-toolbar">
       <button type="button" class="ghost-button mini-button" data-availability-action="all">All available</button>
       <button type="button" class="ghost-button mini-button" data-availability-action="clear">Clear all</button>
     </div>
@@ -1180,7 +1185,8 @@ function renderAvailabilityGrid(selectedAvailability) {
           }).join("")}
         </div>
       `).join("")}
-    </div>`;
+    </div>
+  </div>`;
 }
 
 function renderLocationCheckboxGroup(name, locations, selectedIds = []) {
@@ -2545,6 +2551,126 @@ function formatAvailabilitySummary(availability) {
     .filter((day) => dayMap.has(day.id))
     .map((day) => `${day.label} ${dayMap.get(day.id).map(capitalize).join("/")}`)
     .join(" · ");
+}
+
+function getWeekRequestsForEmployee(employeeId, weekStartDate) {
+  const weekDates = new Set(getWeekDates(weekStartDate));
+  return getEmployeeRequests(employeeId).filter((request) => {
+    if (request.status === "declined") {
+      return false;
+    }
+    return getRequestDates(request).some((date) => weekDates.has(date));
+  });
+}
+
+function getEmployeeWeekPlannerWarnings(employeeId, locationId, weekStartDate) {
+  const employee = getEmployee(employeeId);
+  if (!employee || !locationId || !weekStartDate) {
+    return [];
+  }
+
+  const warnings = [];
+  const availabilitySet = new Set(parseAvailabilitySelection(employee.availability || []));
+  const weekServiceKeys = getWeekDates(weekStartDate).flatMap((date) => getLocationServiceKeysForDate(locationId, date));
+  if (weekServiceKeys.some((key) => !availabilitySet.has(key)) && availabilitySet.size !== AVAILABILITY_KEYS.length) {
+    warnings.push("Availability is limited for part of this week.");
+  }
+
+  const weekRequests = getWeekRequestsForEmployee(employeeId, weekStartDate);
+  if (weekRequests.some((request) => request.type === "time_off")) {
+    warnings.push("Time-off request exists this week.");
+  }
+  if (weekRequests.some((request) => request.type === "swap_shift")) {
+    warnings.push("Shift swap request exists this week.");
+  }
+
+  return warnings.slice(0, 2);
+}
+
+function getShiftConflictWarnings(shift) {
+  const employee = getEmployee(shift.employeeId);
+  if (!employee) {
+    return [];
+  }
+
+  const warnings = [];
+  const availabilitySet = new Set(parseAvailabilitySelection(employee.availability || []));
+  const missingAvailability = getShiftServiceKeys(shift).filter((key) => !availabilitySet.has(key));
+  if (missingAvailability.length) {
+    warnings.push(`Not available: ${formatServiceKeysForWarning(missingAvailability)}.`);
+  }
+
+  const requests = getEmployeeRequests(employee.id).filter((request) =>
+    request.status !== "declined" && doesRequestAffectDate(request, shift.date)
+  );
+  if (requests.some((request) => request.type === "time_off")) {
+    warnings.push("Time-off request on this day.");
+  }
+  if (requests.some((request) => request.type === "swap_shift")) {
+    warnings.push("Shift swap request on this day.");
+  }
+
+  return warnings;
+}
+
+function getShiftServiceKeys(shift) {
+  const date = normalizeIsoDate(shift.date);
+  const locationSetting = getLocationSetting(shift.locationId);
+  const services = AVAILABILITY_SERVICES
+    .filter((service) => isShiftInService(shift, locationSetting, service.id))
+    .map((service) => `${getAvailabilityDayId(date)}_${service.id}`);
+
+  if (services.length) {
+    return services;
+  }
+
+  return [`${getAvailabilityDayId(date)}_${timeToMinutes(shift.start) < 15 * 60 ? "lunch" : "dinner"}`];
+}
+
+function getLocationServiceKeysForDate(locationId, date) {
+  return AVAILABILITY_SERVICES.map((service) => `${getAvailabilityDayId(date)}_${service.id}`);
+}
+
+function getAvailabilityDayId(date) {
+  return ["sun", "mon", "tue", "wed", "thu", "fri", "sat"][new Date(`${normalizeIsoDate(date)}T12:00:00`).getDay()];
+}
+
+function formatServiceKeysForWarning(keys) {
+  const grouped = new Map();
+  keys.forEach((key) => {
+    const [dayId, serviceId] = key.split("_");
+    const current = grouped.get(dayId) || [];
+    current.push(serviceId);
+    grouped.set(dayId, current);
+  });
+
+  return AVAILABILITY_DAYS
+    .filter((day) => grouped.has(day.id))
+    .map((day) => `${day.label} ${grouped.get(day.id).map(capitalize).join("/")}`)
+    .join(" · ");
+}
+
+function doesRequestAffectDate(request, date) {
+  return getRequestDates(request).includes(normalizeIsoDate(date));
+}
+
+function getRequestDates(request) {
+  const startDate = normalizeIsoDate(request.startDate);
+  const endDate = normalizeIsoDate(request.endDate || request.startDate);
+  if (!startDate) {
+    return [];
+  }
+
+  const dates = [];
+  let cursor = startDate;
+  while (cursor && cursor <= endDate) {
+    dates.push(cursor);
+    if (cursor === endDate) {
+      break;
+    }
+    cursor = addDaysToIso(cursor, 1);
+  }
+  return dates;
 }
 
 function formatCurrency(value) {
