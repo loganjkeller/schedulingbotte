@@ -143,9 +143,14 @@ function renderAccessGate() {
   const backendLabel = backend.provider === "appsScript" ? "Google Sheets access mode" : "Local demo access mode";
   el.accessGate.innerHTML = `
     <div class="access-card">
-      <p class="eyebrow">Botte access</p>
-      <h1>Enter with last name and PIN</h1>
-      <p class="hero-copy">Roles are assigned from the backend. Managers get location-based access, employees see only their own schedule and profile.</p>
+      <div class="access-brand">
+        <div class="access-logo">B</div>
+        <div>
+          <p class="eyebrow">Botte access</p>
+          <h1>Botte Scheduling</h1>
+        </div>
+      </div>
+      <p class="access-title">Enter with last name and PIN</p>
       <div class="access-note">${backendLabel}</div>
       <form id="accessForm" class="access-form">
         <div class="form-field">
@@ -158,12 +163,16 @@ function renderAccessGate() {
         </div>
         <button type="submit" class="primary-button access-submit">Access workspace</button>
       </form>
-      <p class="muted access-help">Demo credentials: `Keller / 1111`, `Romano / 2020`, `Torres / 4040`.</p>
+      <div class="access-inline-help">
+        <span class="muted">Need help?</span>
+        <button type="button" class="help-button" data-help="Demo access: Keller / 1111, Romano / 2020, Silva / 3030, Torres / 4040, Haddad / 5050. In the real backend, each last name and PIN will map to a role in Google Sheets.">?</button>
+      </div>
       <p id="accessMessage" class="access-message">${escapeHtml(state.lastSyncMessage || "")}</p>
     </div>
   `;
 
   document.querySelector("#accessForm").addEventListener("submit", handleAccessLogin);
+  bindHelpButtons();
 }
 
 function showAppShell() {
@@ -182,8 +191,7 @@ function renderNav() {
     .map(
       ([key, page]) =>
         `<button type="button" class="nav-tab ${key === state.currentView ? "is-active" : ""}" data-page="${key}">
-          <strong>${page.title}</strong><br />
-          <span class="muted">${page.subtitle}</span>
+          <strong>${page.title}</strong>
         </button>`
     )
     .join("");

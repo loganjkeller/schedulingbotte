@@ -46,6 +46,9 @@ textarea {
   display: none;
   place-items: center;
   padding: 24px;
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.08), transparent 28%),
+    linear-gradient(180deg, #6f202d 0%, #5b1822 100%);
 }
 
 .access-card {
@@ -53,15 +56,41 @@ textarea {
   padding: 34px;
   border-radius: 28px;
   background:
-    linear-gradient(180deg, rgba(255, 252, 247, 0.98), rgba(255, 248, 240, 0.95));
-  border: 1px solid var(--line);
-  box-shadow: var(--shadow);
+    linear-gradient(180deg, rgba(255, 252, 247, 0.98), rgba(255, 248, 240, 0.94));
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 34px 90px rgba(23, 5, 9, 0.35);
+}
+
+.access-brand {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.access-logo {
+  width: 78px;
+  height: 78px;
+  border-radius: 22px;
+  display: grid;
+  place-items: center;
+  background: #6f202d;
+  color: #fff7f2;
+  font-family: "Fraunces", serif;
+  font-size: 2.6rem;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
 }
 
 .access-card h1 {
-  font-size: 2.5rem;
-  line-height: 0.96;
-  margin-bottom: 12px;
+  font-size: 2.7rem;
+  line-height: 0.92;
+  margin-bottom: 0;
+}
+
+.access-title {
+  margin: 0 0 14px;
+  font-size: 1.02rem;
+  color: var(--muted);
 }
 
 .access-form {
@@ -74,9 +103,9 @@ textarea {
   display: inline-flex;
   padding: 8px 12px;
   border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent-deep);
-  margin-top: 14px;
+  background: rgba(111, 32, 45, 0.08);
+  color: #6f202d;
+  margin-bottom: 8px;
   font-size: 0.88rem;
 }
 
@@ -84,10 +113,16 @@ textarea {
   justify-content: center;
 }
 
-.access-help,
+.access-inline-help,
 .access-message {
   margin-top: 10px;
   line-height: 1.5;
+}
+
+.access-inline-help {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .app-shell {
@@ -97,7 +132,7 @@ textarea {
 }
 
 .sidebar {
-  padding: 26px 22px;
+  padding: 22px 18px;
   background: rgba(251, 247, 241, 0.76);
   border-right: 1px solid rgba(217, 202, 183, 0.65);
   backdrop-filter: blur(18px);
@@ -132,7 +167,7 @@ h4 {
 }
 
 h1 {
-  font-size: 2rem;
+  font-size: 1.9rem;
   line-height: 0.95;
 }
 
@@ -146,6 +181,11 @@ h2 {
 .kpi-note {
   margin: 0;
   color: var(--muted);
+}
+
+.sidebar-copy {
+  max-width: 180px;
+  line-height: 1.45;
 }
 
 .sidebar-card,
@@ -222,14 +262,8 @@ textarea {
 
 .nav-tab strong {
   display: block;
-  font-size: 0.98rem;
-}
-
-.nav-tab span {
-  display: block;
-  margin-top: 4px;
-  font-size: 0.88rem;
-  line-height: 1.35;
+  font-size: 0.96rem;
+  font-weight: 700;
 }
 
 .nav-tab.is-active,
@@ -239,15 +273,15 @@ textarea {
 }
 
 .main-content {
-  padding: 26px;
+  padding: 24px 26px 34px;
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
 .hero {
-  padding: 22px 24px;
-  border-radius: 24px;
+  padding: 18px 22px;
+  border-radius: 20px;
   background:
     linear-gradient(135deg, rgba(255, 250, 244, 0.96), rgba(255, 246, 237, 0.92)),
     linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.35));
@@ -260,13 +294,14 @@ textarea {
 }
 
 .hero h2 {
-  font-size: 2.15rem;
-  margin-bottom: 6px;
+  font-size: 2rem;
+  margin-bottom: 4px;
 }
 
 .hero-copy {
-  max-width: 640px;
-  line-height: 1.5;
+  max-width: 520px;
+  line-height: 1.45;
+  font-size: 0.95rem;
 }
 
 .hero-actions,
@@ -376,7 +411,7 @@ textarea {
 
 .view-root {
   display: grid;
-  gap: 18px;
+  gap: 14px;
 }
 
 .panel,
@@ -386,7 +421,7 @@ textarea {
 .list-card,
 .schedule-card,
 .alert-card {
-  padding: 18px;
+  padding: 16px;
 }
 
 .panel {
@@ -405,7 +440,7 @@ textarea {
 
 .stat-card {
   background: rgba(255, 255, 255, 0.65);
-  min-height: 132px;
+  min-height: 122px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -419,7 +454,7 @@ textarea {
 
 .stat-value {
   margin: 8px 0;
-  font-size: 2.3rem;
+  font-size: 2.1rem;
   line-height: 1;
   font-weight: 800;
 }
@@ -503,6 +538,10 @@ textarea {
 .shift-card {
   background: var(--paper-2);
   border-style: solid;
+}
+
+.stack-list {
+  font-size: 0.9rem;
 }
 
 .top-gap {
