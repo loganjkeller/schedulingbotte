@@ -4,18 +4,23 @@ var SHEET_CONFIG = {
   employees: [
     "id",
     "name",
+    "email",
+    "phone",
     "roleId",
+    "positionLabel",
     "locations",
     "hourlyRate",
     "weeklyHoursTarget",
     "tags",
     "availability",
+    "notes",
     "externalEmployeeId",
   ],
   shifts: ["id", "date", "locationId", "employeeId", "roleId", "start", "end", "status", "notes"],
   templates: ["id", "name", "locationIds", "demandLevel", "roles"],
   locationSettings: ["locationId", "weekStartsOn", "publishCutoffHours", "overtimeWarningHours", "approvalRequired"],
-  users: ["id", "name", "email", "role", "managedLocationIds"],
+  users: ["id", "name", "email", "role", "employeeId", "managedLocationIds"],
+  requests: ["id", "employeeId", "type", "status", "startDate", "endDate", "scope", "note", "createdAt"],
 };
 
 function doGet() {
@@ -74,10 +79,37 @@ function bootstrapSheets_() {
 function buildStateForUser_(access) {
   var state = readFullState_();
   var isAdmin = access.role === "admin";
+  var isEmployee = access.role === "employee";
   var allowedLocations = access.managedLocationIds || [];
 
   if (isAdmin) {
     return state;
+  }
+
+  if (isEmployee) {
+    return {
+      meta: state.meta,
+      locations: state.locations.filter(function (row) {
+        return intersects_(row.id ? [row.id] : [], getEmployeeLocations_(state.employees, access.employeeId));
+      }),
+      roles: state.roles,
+      employees: state.employees.filter(function (row) {
+        return row.id === access.employeeId;
+      }),
+      shifts: state.shifts.filter(function (row) {
+        return row.employeeId === access.employeeId;
+      }),
+      templates: [],
+      locationSettings: state.locationSettings.filter(function (row) {
+        return getEmployeeLocations_(state.employees, access.employeeId).indexOf(row.locationId) !== -1;
+      }),
+      users: state.users.filter(function (row) {
+        return row.email === access.email;
+      }),
+      requests: state.requests.filter(function (row) {
+        return row.employeeId === access.employeeId;
+      }),
+    };
   }
 
   return {
@@ -101,6 +133,9 @@ function buildStateForUser_(access) {
     users: state.users.filter(function (row) {
       return row.email === access.email;
     }),
+    requests: state.requests.filter(function (row) {
+      return scopedEmployeeIds_(state.employees, allowedLocations).indexOf(row.employeeId) !== -1;
+    }),
   };
 }
 
@@ -115,6 +150,7 @@ function writeFullState_(payload) {
   writeRows_(spreadsheet.getSheetByName("templates"), SHEET_CONFIG.templates, payload.templates || []);
   writeRows_(spreadsheet.getSheetByName("locationSettings"), SHEET_CONFIG.locationSettings, payload.locationSettings || []);
   writeRows_(spreadsheet.getSheetByName("users"), SHEET_CONFIG.users, payload.users || []);
+  writeRows_(spreadsheet.getSheetByName("requests"), SHEET_CONFIG.requests, payload.requests || []);
 
   PropertiesService.getScriptProperties().setProperty(
     "APP_META",
@@ -138,6 +174,7 @@ function readFullState_() {
     templates: readRows_(spreadsheet.getSheetByName("templates"), SHEET_CONFIG.templates),
     locationSettings: readRows_(spreadsheet.getSheetByName("locationSettings"), SHEET_CONFIG.locationSettings),
     users: readRows_(spreadsheet.getSheetByName("users"), SHEET_CONFIG.users),
+    requests: readRows_(spreadsheet.getSheetByName("requests"), SHEET_CONFIG.requests),
   };
 }
 
@@ -258,6 +295,23 @@ function deserializeCell_(header, value) {
   }
 
   return value;
+}
+
+function scopedEmployeeIds_(employees, allowedLocations) {
+  return employees
+    .filter(function (row) {
+      return intersects_(row.locations, allowedLocations);
+    })
+    .map(function (row) {
+      return row.id;
+    });
+}
+
+function getEmployeeLocations_(employees, employeeId) {
+  var employee = employees.filter(function (row) {
+    return row.id === employeeId;
+  })[0];
+  return employee ? employee.locations : [];
 }
 
 function parseBody_(e) {

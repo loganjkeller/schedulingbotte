@@ -12,11 +12,14 @@ Free-stack scheduling web app starter for a multi-location restaurant business.
 ## What is included
 
 - Weekly scheduling dashboard
+- Admin, manager, and employee role views
 - Admin-only backend configuration screen
-- Manager-scoped access model
+- Manager-scoped employee management and scheduling
+- Employee self-service for profile, requests, and availability updates
 - Four seeded restaurant locations
 - Team directory with future `Botte Employees` external IDs
-- Template and labor settings views
+- Requests inbox and dashboard metrics
+- Copy-last-week scheduling
 - Local demo storage for quick iteration without a backend
 - Remote load/sync controls for Google Apps Script
 - Apps Script backend scaffold in `backend/google-apps-script`
@@ -76,6 +79,8 @@ Because this project is pure static files, no build step is required.
 6. Add your admin email into the `users` sheet.
 7. Deploy the script as a web app.
 8. Paste that web app URL and your Sheet ID into the app’s Admin Backend screen.
+
+If you already had the older version connected, update the Apps Script code, rerun `bootstrapSheets_()`, and redeploy so the new `requests` and employee profile fields exist in the sheet schema.
 
 ## Current remote workflow
 

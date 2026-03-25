@@ -9,8 +9,7 @@ import { cloneState, getWeekDates, loadState, resetState, saveState } from "./da
 const state = {
   appData: loadState(),
   currentUserId: null,
-  currentView: "schedule",
-  isSyncing: false,
+  currentView: "dashboard",
   lastSyncMessage: "Local demo mode active",
   filters: {
     locationId: "all",
@@ -19,24 +18,34 @@ const state = {
 };
 
 const pages = {
+  dashboard: {
+    title: "Dashboard",
+    subtitle: "See today’s staffing picture, open requests, and labor pressure in one place.",
+    roles: ["admin", "manager", "employee"],
+  },
   schedule: {
-    title: "Weekly Schedule",
-    subtitle: "Build the roster, review coverage, and keep each location staffed without leaving the browser.",
+    title: "Scheduling",
+    subtitle: "Build the week, copy last week, publish shifts, and keep each location covered.",
     roles: ["admin", "manager"],
   },
-  team: {
-    title: "Team Directory",
-    subtitle: "Track cross-location employees, availability, labor targets, and future Botte Employees sync IDs.",
+  people: {
+    title: "Team Management",
+    subtitle: "Add or remove employees, update profiles and positions, and manage location assignments.",
     roles: ["admin", "manager"],
   },
-  templates: {
-    title: "Shift Templates",
-    subtitle: "Capture repeatable staffing patterns so managers can generate schedules faster across all restaurants.",
-    roles: ["admin", "manager"],
+  requests: {
+    title: "Requests",
+    subtitle: "Track time-off, availability changes, and employee messages to managers and admin.",
+    roles: ["admin", "manager", "employee"],
+  },
+  profile: {
+    title: "My Profile",
+    subtitle: "Review your details, upcoming shifts, and update profile information.",
+    roles: ["employee"],
   },
   settings: {
     title: "Admin Backend",
-    subtitle: "Control locations, labor rules, backend connectivity, and manager permissions in one place.",
+    subtitle: "Control permissions, locations, and Google Sheets connection settings.",
     roles: ["admin"],
   },
 };
@@ -69,16 +78,15 @@ async function init() {
 function wireEvents() {
   el.userSelect.addEventListener("change", (event) => {
     state.currentUserId = event.target.value;
-    const availablePages = getVisiblePages();
-    if (!availablePages[state.currentView]) {
-      state.currentView = Object.keys(availablePages)[0];
-    }
+    ensureVisibleView();
     render();
   });
 
   el.seedButton.addEventListener("click", () => {
     state.appData = resetState();
     state.currentUserId = state.appData.users[0]?.id ?? null;
+    state.currentView = "dashboard";
+    state.lastSyncMessage = "Demo data reset";
     render();
   });
 
@@ -94,12 +102,20 @@ function wireEvents() {
 }
 
 function render() {
+  ensureVisibleView();
   renderUserSelect();
   renderNav();
   renderHero();
   renderStats();
   renderAlerts();
   renderView();
+}
+
+function ensureVisibleView() {
+  const visiblePages = getVisiblePages();
+  if (!visiblePages[state.currentView]) {
+    state.currentView = Object.keys(visiblePages)[0];
+  }
 }
 
 function renderUserSelect() {
@@ -111,8 +127,10 @@ function renderUserSelect() {
     )
     .join("");
 
-  const managedNames = currentUser.managedLocationIds.map(getLocationName).join(", ");
-  el.roleSummary.textContent = `${capitalize(currentUser.role)} access for ${managedNames}`;
+  const scope = currentUser.role === "employee"
+    ? getEmployeeByUser(currentUser)?.locations.map(getLocationName).join(", ") || "No locations"
+    : currentUser.managedLocationIds.map(getLocationName).join(", ");
+  el.roleSummary.textContent = `${capitalize(currentUser.role)} access · ${scope}`;
 }
 
 function renderNav() {
@@ -142,27 +160,11 @@ function renderHero() {
 }
 
 function renderStats() {
-  const user = getCurrentUser();
-  const managedLocationIds = user.managedLocationIds;
-  const employees = state.appData.employees.filter((employee) =>
-    employee.locations.some((locationId) => managedLocationIds.includes(locationId))
-  );
-  const shifts = state.appData.shifts.filter((shift) => managedLocationIds.includes(shift.locationId));
-  const published = shifts.filter((shift) => shift.status === "published").length;
-  const draft = shifts.length - published;
-  const laborHours = shifts.reduce((total, shift) => total + calculateHours(shift.start, shift.end), 0);
-
-  const stats = [
-    { label: "Managed locations", value: managedLocationIds.length, note: managedLocationIds.map(getLocationName).join(", ") },
-    { label: "Scheduled employees", value: employees.length, note: "Cross-location staff included" },
-    { label: "Published shifts", value: published, note: `${draft} still in draft` },
-    { label: "Weekly labor hours", value: laborHours.toFixed(1), note: "Demo calculation from assigned shifts" },
-  ];
-
+  const stats = buildStatsForUser(getCurrentUser());
   el.statsGrid.innerHTML = stats
     .map(
       (item) => `<article class="stat-card">
-        <p class="muted">${item.label}</p>
+        <p class="stat-label">${item.label}</p>
         <p class="stat-value">${item.value}</p>
         <p class="kpi-note">${item.note}</p>
       </article>`
@@ -184,14 +186,20 @@ function renderAlerts() {
 
 function renderView() {
   switch (state.currentView) {
+    case "dashboard":
+      renderDashboardView();
+      break;
     case "schedule":
       renderScheduleView();
       break;
-    case "team":
-      renderTeamView();
+    case "people":
+      renderPeopleView();
       break;
-    case "templates":
-      renderTemplatesView();
+    case "requests":
+      renderRequestsView();
+      break;
+    case "profile":
+      renderProfileView();
       break;
     case "settings":
       renderSettingsView();
@@ -201,44 +209,145 @@ function renderView() {
   }
 }
 
-function renderScheduleView() {
+function renderDashboardView() {
   const user = getCurrentUser();
-  const weekDates = getWeekDates();
-  const locationOptions = getUserLocationOptions(user);
-  const roleOptions = state.appData.roles;
-  const employeeOptions = state.appData.employees.filter((employee) =>
-    employee.locations.some((locationId) => user.managedLocationIds.includes(locationId))
-  );
+
+  if (user.role === "employee") {
+    const employee = getEmployeeByUser(user);
+    const upcomingShifts = getEmployeeShifts(employee.id).slice(0, 4);
+    const requests = getEmployeeRequests(employee.id);
+    el.viewRoot.innerHTML = `
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h3>My week</h3>
+            <p class="muted">A simple view of where you work, when you work, and what still needs approval.</p>
+          </div>
+          ${renderHelpButton("Employees can review upcoming shifts, track requests, and update their profile without needing manager access.")}
+        </div>
+        <div class="summary-grid">
+          <article class="summary-card">
+            <p class="eyebrow">Primary position</p>
+            <h3>${getRoleName(employee.roleId)}</h3>
+            <p class="muted">${employee.locations.map(getLocationName).join(", ")}</p>
+          </article>
+          <article class="summary-card">
+            <p class="eyebrow">Upcoming shifts</p>
+            <h3>${upcomingShifts.length}</h3>
+            <p class="muted">${upcomingShifts.length ? "Scheduled this week" : "No shifts scheduled yet"}</p>
+          </article>
+          <article class="summary-card">
+            <p class="eyebrow">Open requests</p>
+            <h3>${requests.filter((item) => item.status === "pending").length}</h3>
+            <p class="muted">Pending manager or admin review</p>
+          </article>
+        </div>
+      </section>
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h3>Upcoming shifts</h3>
+            <p class="muted">Your next scheduled shifts and notes.</p>
+          </div>
+        </div>
+        <div class="list-grid">
+          ${upcomingShifts.map(renderEmployeeShiftCard).join("") || renderInlineEmpty("No upcoming shifts yet.")}
+        </div>
+      </section>
+    `;
+    bindHelpButtons();
+    return;
+  }
+
+  const visibleEmployees = getScopedEmployees(user);
+  const visibleShifts = getScopedShifts(user);
+  const pendingRequests = getScopedRequests(user).filter((request) => request.status === "pending");
+  const locationCards = getScopedLocations(user)
+    .map((location) => {
+      const locationShifts = visibleShifts.filter((shift) => shift.locationId === location.id);
+      const hours = locationShifts.reduce((total, shift) => total + calculateHours(shift.start, shift.end), 0);
+      return `<article class="summary-card">
+        <p class="eyebrow">${location.city}</p>
+        <h3>${location.name}</h3>
+        <p class="muted">${locationShifts.length} shifts · ${hours.toFixed(1)} hours</p>
+      </article>`;
+    })
+    .join("");
 
   el.viewRoot.innerHTML = `
     <section class="panel">
       <div class="panel-header">
         <div>
-          <h3>Coverage board</h3>
-          <p class="muted">Review staffing by day, location, and role. Managers only see their assigned restaurants.</p>
+          <h3>Operations overview</h3>
+          <p class="muted">A cleaner high-level dashboard for labor, staffing, and requests.</p>
         </div>
-        <button type="button" class="small-button" id="quickPublish">Publish all draft shifts in view</button>
+        ${renderHelpButton("Managers can see only their locations. Admin sees everything. Use this page to quickly spot staffing gaps and pending employee requests.")}
+      </div>
+      <div class="summary-grid">
+        ${locationCards}
+      </div>
+    </section>
+    <section class="dual-grid">
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <h3>Pending requests</h3>
+            <p class="muted">Time-off, availability, and help requests waiting for review.</p>
+          </div>
+        </div>
+        <div class="list-grid">
+          ${pendingRequests.slice(0, 6).map(renderRequestCard).join("") || renderInlineEmpty("No pending requests right now.")}
+        </div>
+      </article>
+      <article class="panel">
+        <div class="panel-header">
+          <div>
+            <h3>People snapshot</h3>
+            <p class="muted">Track who is active across your restaurants.</p>
+          </div>
+        </div>
+        <div class="list-grid compact-list">
+          ${visibleEmployees.slice(0, 6).map(renderEmployeeListCard).join("")}
+        </div>
+      </article>
+    </section>
+  `;
+  bindHelpButtons();
+}
+
+function renderScheduleView() {
+  const user = getCurrentUser();
+  const weekDates = getWeekDates();
+  const locationOptions = getScopedLocations(user);
+  const roleOptions = state.appData.roles;
+  const employeeOptions = getScopedEmployees(user);
+
+  el.viewRoot.innerHTML = `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h3>Weekly planner</h3>
+          <p class="muted">Build the schedule by location, then publish when the week is ready.</p>
+        </div>
+        <div class="action-row">
+          ${renderHelpButton("Copy last week duplicates the previous week's shifts and moves them forward by 7 days. Publish turns visible draft shifts into published shifts.")}
+          <button type="button" class="small-button" id="copyWeekButton">Copy last week</button>
+          <button type="button" class="small-button" id="quickPublish">Publish visible drafts</button>
+        </div>
       </div>
       <div class="filter-bar">
         <div class="form-field">
           <label for="locationFilter">Location</label>
           <select id="locationFilter">
-            <option value="all">All managed locations</option>
-            ${locationOptions
-              .map(
-                (location) =>
-                  `<option value="${location.id}" ${location.id === state.filters.locationId ? "selected" : ""}>${location.name}</option>`
-              )
-              .join("")}
+            <option value="all">All visible locations</option>
+            ${locationOptions.map(renderLocationOption).join("")}
           </select>
         </div>
         <div class="form-field">
-          <label for="roleFilter">Role</label>
+          <label for="roleFilter">Position</label>
           <select id="roleFilter">
-            <option value="all">All roles</option>
-            ${roleOptions
-              .map((role) => `<option value="${role.id}" ${role.id === state.filters.roleId ? "selected" : ""}>${role.name}</option>`)
-              .join("")}
+            <option value="all">All positions</option>
+            ${roleOptions.map(renderRoleOption).join("")}
           </select>
         </div>
       </div>
@@ -249,8 +358,8 @@ function renderScheduleView() {
     <section class="panel">
       <div class="panel-header">
         <div>
-          <h3>Create a shift</h3>
-          <p class="muted">This saves to the local demo store now, and later the same payload can post to Google Apps Script.</p>
+          <h3>Add shift</h3>
+          <p class="muted">A simple scheduling form for managers and admin.</p>
         </div>
       </div>
       <form id="shiftForm" class="form-grid">
@@ -267,7 +376,7 @@ function renderScheduleView() {
           <select id="shiftEmployee">${employeeOptions.map((employee) => `<option value="${employee.id}">${employee.name}</option>`).join("")}</select>
         </div>
         <div class="form-field">
-          <label for="shiftRole">Role</label>
+          <label for="shiftRole">Position</label>
           <select id="shiftRole">${roleOptions.map((role) => `<option value="${role.id}">${role.name}</option>`).join("")}</select>
         </div>
         <div class="form-field">
@@ -278,162 +387,214 @@ function renderScheduleView() {
           <label for="shiftEnd">End</label>
           <input id="shiftEnd" type="time" value="22:00" />
         </div>
-        <div class="form-field" style="grid-column: 1 / -1;">
+        <div class="form-field full-span">
           <label for="shiftNotes">Notes</label>
-          <textarea id="shiftNotes" placeholder="Service notes, event prep, station, or coverage details"></textarea>
+          <textarea id="shiftNotes" placeholder="Section, prep notes, opening, closing, event details"></textarea>
         </div>
-        <div class="inline-form" style="grid-column: 1 / -1;">
+        <div class="inline-form full-span">
           <button type="submit" class="primary-button">Add shift</button>
         </div>
       </form>
     </section>
-    <section class="summary-grid">
-      ${renderScheduleSummaryCards(user)}
-    </section>
   `;
 
+  document.querySelector("#locationFilter").value = state.filters.locationId;
+  document.querySelector("#roleFilter").value = state.filters.roleId;
   document.querySelector("#locationFilter").addEventListener("change", (event) => {
     state.filters.locationId = event.target.value;
     renderScheduleView();
   });
-
   document.querySelector("#roleFilter").addEventListener("change", (event) => {
     state.filters.roleId = event.target.value;
     renderScheduleView();
   });
-
-  document.querySelector("#quickPublish").addEventListener("click", () => {
-    const shifts = getVisibleShifts(user).map((shift) => ({
-      ...shift,
-      status: "published",
-    }));
-    state.appData.shifts = state.appData.shifts.map((existing) => shifts.find((shift) => shift.id === existing.id) ?? existing);
-    saveState(state.appData);
-    render();
-  });
-
-  document.querySelector("#shiftForm").addEventListener("submit", (event) => {
-    event.preventDefault();
-
-    const newShift = {
-      id: `shift-${crypto.randomUUID()}`,
-      date: document.querySelector("#shiftDate").value,
-      locationId: document.querySelector("#shiftLocation").value,
-      employeeId: document.querySelector("#shiftEmployee").value,
-      roleId: document.querySelector("#shiftRole").value,
-      start: document.querySelector("#shiftStart").value,
-      end: document.querySelector("#shiftEnd").value,
-      status: "draft",
-      notes: document.querySelector("#shiftNotes").value.trim() || "Added from the scheduler workspace",
-    };
-
-    state.appData.shifts = [...state.appData.shifts, newShift];
-    saveState(state.appData);
-    render();
-  });
+  document.querySelector("#quickPublish").addEventListener("click", publishVisibleShifts);
+  document.querySelector("#copyWeekButton").addEventListener("click", copyLastWeek);
+  document.querySelector("#shiftForm").addEventListener("submit", handleCreateShift);
+  bindHelpButtons();
 }
 
-function renderTeamView() {
+function renderPeopleView() {
   const user = getCurrentUser();
-  const employees = state.appData.employees.filter((employee) =>
-    employee.locations.some((locationId) => user.managedLocationIds.includes(locationId))
-  );
+  const employees = getScopedEmployees(user);
 
   el.viewRoot.innerHTML = `
     <section class="panel">
       <div class="panel-header">
         <div>
-          <h3>Employee roster</h3>
-          <p class="muted">Each profile includes location assignments, labor targets, availability, and Botte Employees sync IDs.</p>
+          <h3>Employee management</h3>
+          <p class="muted">Managers can add or remove employees, update profiles, and assign positions by location.</p>
         </div>
+        ${renderHelpButton("Managers can only edit employees in their own locations. Admin can manage everybody.")}
       </div>
       <div class="employees-grid">
-        ${employees.map(renderEmployeeCard).join("")}
+        ${employees.map(renderEmployeeManagerCard).join("")}
       </div>
     </section>
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h3>Add employee</h3>
+          <p class="muted">Create a new team member and assign them to one or more restaurants.</p>
+        </div>
+      </div>
+      <form id="employeeForm" class="form-grid">
+        <div class="form-field">
+          <label for="employeeName">Name</label>
+          <input id="employeeName" placeholder="New employee name" />
+        </div>
+        <div class="form-field">
+          <label for="employeeEmail">Email</label>
+          <input id="employeeEmail" placeholder="employee@botte.com" />
+        </div>
+        <div class="form-field">
+          <label for="employeeRole">Position</label>
+          <select id="employeeRole">${state.appData.roles.map((role) => `<option value="${role.id}">${role.name}</option>`).join("")}</select>
+        </div>
+        <div class="form-field">
+          <label for="employeeLocation">Primary location</label>
+          <select id="employeeLocation">${getScopedLocations(user).map((location) => `<option value="${location.id}">${location.name}</option>`).join("")}</select>
+        </div>
+        <div class="form-field">
+          <label for="employeeRate">Hourly rate</label>
+          <input id="employeeRate" type="number" min="0" step="1" value="18" />
+        </div>
+        <div class="form-field">
+          <label for="employeeTargetHours">Weekly target</label>
+          <input id="employeeTargetHours" type="number" min="0" step="1" value="32" />
+        </div>
+        <div class="inline-form full-span">
+          <button type="submit" class="primary-button">Add employee</button>
+        </div>
+      </form>
+    </section>
   `;
+
+  document.querySelectorAll("[data-action='delete-employee']").forEach((button) => {
+    button.addEventListener("click", () => deleteEmployee(button.dataset.id));
+  });
+  document.querySelectorAll("[data-action='edit-employee']").forEach((button) => {
+    button.addEventListener("click", () => openEmployeeEdit(button.dataset.id));
+  });
+  document.querySelector("#employeeForm").addEventListener("submit", handleCreateEmployee);
+  bindHelpButtons();
 }
 
-function renderTemplatesView() {
+function renderRequestsView() {
   const user = getCurrentUser();
-  const templates = state.appData.templates.filter((template) =>
-    template.locationIds.some((locationId) => user.managedLocationIds.includes(locationId))
-  );
+  const visibleRequests = getScopedRequests(user);
+  const requestOptions = user.role === "employee"
+    ? `
+      <option value="time_off">Time off</option>
+      <option value="availability_change">Availability change</option>
+      <option value="message">Message to manager/admin</option>
+    `
+    : `
+      <option value="time_off">Time off</option>
+      <option value="availability_change">Availability change</option>
+      <option value="message">Message</option>
+    `;
 
   el.viewRoot.innerHTML = `
     <section class="panel">
       <div class="panel-header">
         <div>
-          <h3>Reusable staffing templates</h3>
-          <p class="muted">Use these to standardize lunch, dinner, event, and brunch coverage by location group.</p>
+          <h3>${user.role === "employee" ? "Send a request" : "Request inbox"}</h3>
+          <p class="muted">${user.role === "employee" ? "Ask for time off, update your availability, or send a note to your managers." : "Review incoming employee requests and approve or decline them."}</p>
         </div>
+        ${renderHelpButton("Availability change can be temporary for a date range or permanent. Messages are a lightweight way for employees to contact managers or admin.")}
       </div>
-      <div class="templates-grid">
-        ${templates
-          .map(
-            (template) => `<article class="summary-card">
-              <p class="eyebrow">${template.demandLevel} demand</p>
-              <h3>${template.name}</h3>
-              <p class="muted">${template.locationIds.map(getLocationName).join(", ")}</p>
-              <ul class="mini-list">${template.roles.map((role) => `<li>${role}</li>`).join("")}</ul>
-            </article>`
-          )
-          .join("")}
+      ${user.role === "employee" ? renderEmployeeRequestForm() : ""}
+      <div class="list-grid">
+        ${visibleRequests.map(renderRequestCard).join("") || renderInlineEmpty("No requests found.")}
       </div>
     </section>
   `;
+
+  if (user.role === "employee") {
+    document.querySelector("#requestForm").addEventListener("submit", handleCreateRequest);
+  } else {
+    document.querySelectorAll("[data-action='approve-request']").forEach((button) => {
+      button.addEventListener("click", () => updateRequestStatus(button.dataset.id, "approved"));
+    });
+    document.querySelectorAll("[data-action='decline-request']").forEach((button) => {
+      button.addEventListener("click", () => updateRequestStatus(button.dataset.id, "declined"));
+    });
+  }
+  bindHelpButtons();
+}
+
+function renderProfileView() {
+  const user = getCurrentUser();
+  const employee = getEmployeeByUser(user);
+  const shifts = getEmployeeShifts(employee.id);
+
+  el.viewRoot.innerHTML = `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h3>My profile</h3>
+          <p class="muted">Employees can update their personal information without changing manager-only scheduling fields.</p>
+        </div>
+        ${renderHelpButton("Profile edits update your employee record. Availability changes should be sent from the Requests page so managers can review them.")}
+      </div>
+      <form id="profileForm" class="form-grid">
+        <div class="form-field">
+          <label for="profileName">Name</label>
+          <input id="profileName" value="${employee.name}" />
+        </div>
+        <div class="form-field">
+          <label for="profilePhone">Phone</label>
+          <input id="profilePhone" value="${employee.phone || ""}" />
+        </div>
+        <div class="form-field">
+          <label for="profileEmail">Email</label>
+          <input id="profileEmail" value="${employee.email || ""}" />
+        </div>
+        <div class="form-field">
+          <label for="profileNotes">Notes</label>
+          <input id="profileNotes" value="${employee.notes || ""}" />
+        </div>
+        <div class="inline-form full-span">
+          <button type="submit" class="primary-button">Save profile</button>
+        </div>
+      </form>
+    </section>
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h3>My shifts</h3>
+          <p class="muted">Upcoming assignments, restaurant, and position.</p>
+        </div>
+      </div>
+      <div class="list-grid">
+        ${shifts.map(renderEmployeeShiftCard).join("") || renderInlineEmpty("No shifts scheduled.")}
+      </div>
+    </section>
+  `;
+
+  document.querySelector("#profileForm").addEventListener("submit", handleUpdateOwnProfile);
+  bindHelpButtons();
 }
 
 function renderSettingsView() {
   const backend = state.appData.meta.backend;
-
   el.viewRoot.innerHTML = `
     <section class="panel">
       <div class="panel-header">
         <div>
-          <h3>Admin configuration</h3>
-          <p class="muted">This is the future real-time backend control area for locations, rules, managers, and Google Sheets connectivity.</p>
+          <h3>Permissions and locations</h3>
+          <p class="muted">Admin can manage locations, manager coverage, and app access.</p>
         </div>
-        <button type="button" class="small-button" id="healthcheckButton">Test Apps Script endpoint</button>
+        ${renderHelpButton("Managers can schedule and manage employee records for their locations only. Employees never see this page.")}
       </div>
-      <div class="settings-grid">
-        ${state.appData.locationSettings.map(renderLocationSettingCard).join("")}
+      <div class="summary-grid">
+        ${state.appData.locations.map(renderLocationSettingsCard).join("")}
       </div>
-    </section>
-    <section class="panel">
-      <div class="panel-header">
-        <div>
-          <h3>Location and manager access</h3>
-          <p class="muted">Admins can add locations and review which managers control each restaurant.</p>
-        </div>
-      </div>
-      <form id="locationForm" class="form-grid">
-        <div class="form-field">
-          <label for="locationName">Location name</label>
-          <input id="locationName" placeholder="Upper East Side" />
-        </div>
-        <div class="form-field">
-          <label for="locationCity">City</label>
-          <input id="locationCity" placeholder="New York" />
-        </div>
-        <div class="form-field">
-          <label for="locationTarget">Labor target</label>
-          <input id="locationTarget" type="number" min="0" max="1" step="0.01" value="0.30" />
-        </div>
-        <div class="inline-form" style="grid-column: 1 / -1;">
-          <button type="submit" class="primary-button">Add location</button>
-        </div>
-      </form>
-      <div class="summary-grid" style="margin-top: 16px;">
+      <div class="summary-grid top-gap">
         ${state.appData.users
-          .filter((user) => user.role === "manager")
-          .map(
-            (user) => `<article class="summary-card">
-              <p class="eyebrow">Manager access</p>
-              <h3>${user.name}</h3>
-              <p class="muted">${user.managedLocationIds.map(getLocationName).join(", ")}</p>
-            </article>`
-          )
+          .filter((user) => user.role !== "employee")
+          .map(renderUserAccessCard)
           .join("")}
       </div>
     </section>
@@ -441,7 +602,7 @@ function renderSettingsView() {
       <div class="panel-header">
         <div>
           <h3>Backend connector</h3>
-          <p class="muted">GitHub Pages can host the app UI, but Google Apps Script should own live writes to Google Sheets.</p>
+          <p class="muted">Keep local demo mode for testing or connect to Google Apps Script for live Sheets data.</p>
         </div>
       </div>
       <div class="form-grid">
@@ -461,233 +622,453 @@ function renderSettingsView() {
           <input id="sheetId" value="${backend.sheetId}" placeholder="1abc..." />
         </div>
       </div>
-      <div class="inline-form" style="margin-top: 14px;">
+      <div class="inline-form top-gap">
         <button type="button" class="primary-button" id="saveBackendButton">Save backend settings</button>
         <button type="button" class="ghost-button" id="loadRemoteButton">Load remote data</button>
         <button type="button" class="ghost-button" id="syncRemoteButton">Sync local to remote</button>
-        <button type="button" class="ghost-button" id="copyPayloadButton">Copy sync payload</button>
+        <button type="button" class="ghost-button" id="healthcheckButton">Test Apps Script endpoint</button>
       </div>
-      <div class="summary-grid" style="margin-top: 16px;">
-        <article class="summary-card">
-          <p class="eyebrow">Suggested auth</p>
-          <h3>Email allowlist</h3>
-          <p class="muted">Store admin and manager email/role mappings in Sheets, validate in Apps Script, and return only allowed data per user.</p>
-        </article>
-        <article class="summary-card">
-          <p class="eyebrow">Suggested integration</p>
-          <h3>Botte Employees ready</h3>
-          <p class="muted">Each employee already carries an external ID so the scheduler can later sync profiles, PTO, and shift confirmations.</p>
-        </article>
-        <article class="summary-card">
+      <div class="summary-grid top-gap">
+        <article class="summary-card code-card">
           <p class="eyebrow">Apps Script starter</p>
-          <h3>Server example</h3>
-          <pre class="muted">${escapeHtml(createAppsScriptExample())}</pre>
+          <pre>${escapeHtml(createAppsScriptExample())}</pre>
         </article>
       </div>
     </section>
   `;
 
-  document.querySelector("#saveBackendButton").addEventListener("click", () => {
-    state.appData.meta.backend.appsScriptUrl = document.querySelector("#appsScriptUrl").value.trim();
-    state.appData.meta.backend.sheetId = document.querySelector("#sheetId").value.trim();
-    state.appData.meta.backend.provider = document.querySelector("#backendProvider").value;
-    saveState(state.appData);
-    state.lastSyncMessage = `Saved backend mode: ${state.appData.meta.backend.provider}`;
-    render();
-  });
-
-  document.querySelector("#copyPayloadButton").addEventListener("click", async () => {
-    await navigator.clipboard.writeText(JSON.stringify(createSyncPayload(), null, 2));
-  });
-
-  document.querySelector("#healthcheckButton").addEventListener("click", async () => {
-    const url = document.querySelector("#appsScriptUrl").value.trim();
-    if (!url) {
-      window.alert("Add your Apps Script URL first.");
-      return;
-    }
-
-    try {
-      const result = await pingAppsScript(url);
-      window.alert(`Apps Script is reachable: ${JSON.stringify(result)}`);
-    } catch (error) {
-      window.alert(`Healthcheck failed: ${error.message}`);
-    }
-  });
-
-  document.querySelector("#loadRemoteButton").addEventListener("click", async () => {
-    await loadFromRemote();
-  });
-
-  document.querySelector("#syncRemoteButton").addEventListener("click", async () => {
-    await pushToRemote();
-  });
-
-  document.querySelector("#locationForm").addEventListener("submit", (event) => {
-    event.preventDefault();
-    const locationName = document.querySelector("#locationName").value.trim();
-    const locationCity = document.querySelector("#locationCity").value.trim();
-    const laborTarget = Number(document.querySelector("#locationTarget").value);
-
-    if (!locationName || !locationCity || Number.isNaN(laborTarget)) {
-      window.alert("Fill in the location details first.");
-      return;
-    }
-
-    const slug = slugify(locationName);
-    const locationId = `loc-${slug}`;
-
-    state.appData.locations = [
-      ...state.appData.locations,
-      {
-        id: locationId,
-        name: locationName,
-        city: locationCity,
-        timezone: "America/New_York",
-        laborTarget,
-      },
-    ];
-
-    state.appData.locationSettings = [
-      ...state.appData.locationSettings,
-      {
-        locationId,
-        weekStartsOn: "Monday",
-        publishCutoffHours: 48,
-        overtimeWarningHours: 40,
-        approvalRequired: true,
-      },
-    ];
-
-    state.appData.users = state.appData.users.map((user) =>
-      user.role === "admin"
-        ? { ...user, managedLocationIds: [...new Set([...user.managedLocationIds, locationId])] }
-        : user
-    );
-
-    saveState(state.appData);
-    render();
-  });
-}
-
-function renderLocationSettingCard(setting) {
-  const location = state.appData.locations.find((item) => item.id === setting.locationId);
-  return `<article class="settings-card">
-    <p class="eyebrow">${location.city}</p>
-    <h3>${location.name}</h3>
-    <div class="pill-row">
-      <span class="pill accent">Week starts ${setting.weekStartsOn}</span>
-      <span class="pill">Publish ${setting.publishCutoffHours}h before</span>
-      <span class="pill warning">OT warning ${setting.overtimeWarningHours}h</span>
-    </div>
-    <p class="kpi-note">Labor target ${(location.laborTarget * 100).toFixed(0)}% · Approval ${setting.approvalRequired ? "required" : "optional"}</p>
-  </article>`;
-}
-
-function renderScheduleSummaryCards(user) {
-  const shifts = getVisibleShifts(user);
-  const perLocation = user.managedLocationIds.map((locationId) => {
-    const locationShifts = shifts.filter((shift) => shift.locationId === locationId);
-    const hours = locationShifts.reduce((total, shift) => total + calculateHours(shift.start, shift.end), 0);
-    return `<article class="summary-card">
-      <p class="eyebrow">${getLocationName(locationId)}</p>
-      <h3>${locationShifts.length} shifts</h3>
-      <p class="muted">${hours.toFixed(1)} labor hours this week</p>
-    </article>`;
-  });
-
-  return perLocation.join("");
+  document.querySelector("#saveBackendButton").addEventListener("click", saveBackendSettings);
+  document.querySelector("#loadRemoteButton").addEventListener("click", loadFromRemote);
+  document.querySelector("#syncRemoteButton").addEventListener("click", pushToRemote);
+  document.querySelector("#healthcheckButton").addEventListener("click", testHealthcheck);
+  bindHelpButtons();
 }
 
 function renderDayColumn(date, user) {
   const shifts = getVisibleShifts(user).filter((shift) => shift.date === date);
   const label = formatDate(date);
-  const totalHours = shifts.reduce((total, shift) => total + calculateHours(shift.start, shift.end), 0);
-
   return `<article class="schedule-card">
     <header>
       <h3>${label.weekday}</h3>
       <p class="muted">${label.fullDate}</p>
-      <div class="badge-row">
-        <span class="badge">${shifts.length} shifts</span>
-        <span class="badge">${totalHours.toFixed(1)} hours</span>
-      </div>
     </header>
     <div class="shift-stack">
-      ${shifts.length ? shifts.map(renderShiftCard).join("") : `<p class="muted">No shifts assigned.</p>`}
+      ${shifts.map(renderShiftCard).join("") || renderInlineEmpty("No shifts")}
     </div>
   </article>`;
 }
 
 function renderShiftCard(shift) {
-  const employee = state.appData.employees.find((item) => item.id === shift.employeeId);
-  const role = state.appData.roles.find((item) => item.id === shift.roleId);
+  const employee = getEmployee(shift.employeeId);
   return `<article class="shift-card">
-    <strong>${employee.name}</strong>
-    <p class="muted">${getLocationName(shift.locationId)} · ${role.name}</p>
+    <div class="shift-head">
+      <strong>${employee?.name || "Unknown employee"}</strong>
+      <button type="button" class="icon-button" data-action="delete-shift" data-id="${shift.id}">Remove</button>
+    </div>
+    <p class="muted">${getLocationName(shift.locationId)} · ${getRoleName(shift.roleId)}</p>
     <div class="pill-row">
       <span class="pill">${shift.start} - ${shift.end}</span>
-      <span class="pill ${shift.status === "draft" ? "warning" : "accent"}">${capitalize(shift.status)}</span>
+      <span class="pill ${shift.status === "published" ? "accent" : "warning"}">${capitalize(shift.status)}</span>
     </div>
-    <p class="kpi-note">${shift.notes}</p>
+    <p class="kpi-note">${shift.notes || "No notes"}</p>
   </article>`;
 }
 
-function renderEmployeeCard(employee) {
-  const role = state.appData.roles.find((item) => item.id === employee.roleId);
+function renderEmployeeManagerCard(employee) {
   return `<article class="employee-card">
-    <p class="eyebrow">${role.name}</p>
+    <p class="eyebrow">${getRoleName(employee.roleId)}</p>
     <h4>${employee.name}</h4>
     <p class="muted">${employee.locations.map(getLocationName).join(", ")}</p>
     <div class="tag-row">
       <span class="tag">$${employee.hourlyRate}/hr</span>
       <span class="tag">${employee.weeklyHoursTarget}h target</span>
-      <span class="tag">${employee.externalEmployeeId}</span>
+      <span class="tag">${employee.phone || "No phone"}</span>
     </div>
-    <p class="kpi-note">Availability: ${employee.availability.join(", ")}</p>
-    <div class="tag-row">
-      ${employee.tags.map((tag) => `<span class="tag">${tag}</span>`).join("")}
+    <p class="kpi-note">${employee.email || "No email"} · ${employee.positionLabel || getRoleName(employee.roleId)}</p>
+    <div class="inline-form top-gap">
+      <button type="button" class="small-button" data-action="edit-employee" data-id="${employee.id}">Edit</button>
+      <button type="button" class="ghost-button" data-action="delete-employee" data-id="${employee.id}">Remove</button>
     </div>
   </article>`;
 }
 
-function renderEmpty() {
-  const template = document.querySelector("#emptyStateTemplate");
-  el.viewRoot.innerHTML = "";
-  el.viewRoot.append(template.content.cloneNode(true));
+function renderEmployeeListCard(employee) {
+  return `<article class="list-card">
+    <strong>${employee.name}</strong>
+    <p class="muted">${getRoleName(employee.roleId)} · ${employee.locations.map(getLocationName).join(", ")}</p>
+  </article>`;
+}
+
+function renderEmployeeShiftCard(shift) {
+  return `<article class="list-card">
+    <strong>${formatDate(shift.date).weekday} · ${formatDate(shift.date).fullDate}</strong>
+    <p class="muted">${getLocationName(shift.locationId)} · ${getRoleName(shift.roleId)}</p>
+    <p class="kpi-note">${shift.start} - ${shift.end}${shift.notes ? ` · ${shift.notes}` : ""}</p>
+  </article>`;
+}
+
+function renderRequestCard(request) {
+  const employee = getEmployee(request.employeeId);
+  const actionButtons = getCurrentUser().role === "employee"
+    ? ""
+    : `<div class="inline-form top-gap">
+        <button type="button" class="small-button" data-action="approve-request" data-id="${request.id}">Approve</button>
+        <button type="button" class="ghost-button" data-action="decline-request" data-id="${request.id}">Decline</button>
+      </div>`;
+  return `<article class="list-card">
+    <div class="pill-row">
+      <span class="pill">${humanizeRequestType(request.type)}</span>
+      <span class="pill ${request.status === "approved" ? "accent" : request.status === "declined" ? "" : "warning"}">${capitalize(request.status)}</span>
+    </div>
+    <strong>${employee?.name || "Unknown employee"}</strong>
+    <p class="muted">${request.startDate || "Open"}${request.endDate ? ` to ${request.endDate}` : ""}</p>
+    <p class="kpi-note">${request.note || "No note added"}</p>
+    ${actionButtons}
+  </article>`;
+}
+
+function renderLocationSettingsCard(location) {
+  const config = state.appData.locationSettings.find((item) => item.locationId === location.id);
+  return `<article class="summary-card">
+    <p class="eyebrow">${location.city}</p>
+    <h3>${location.name}</h3>
+    <p class="muted">Labor target ${(location.laborTarget * 100).toFixed(0)}%</p>
+    <div class="tag-row">
+      <span class="tag">Publish ${config.publishCutoffHours}h before</span>
+      <span class="tag">OT ${config.overtimeWarningHours}h</span>
+    </div>
+  </article>`;
+}
+
+function renderUserAccessCard(user) {
+  return `<article class="summary-card">
+    <p class="eyebrow">${capitalize(user.role)}</p>
+    <h3>${user.name}</h3>
+    <p class="muted">${user.email}</p>
+    <p class="kpi-note">${(user.managedLocationIds || []).map(getLocationName).join(", ") || "No assigned locations"}</p>
+  </article>`;
+}
+
+function renderEmployeeRequestForm() {
+  return `<form id="requestForm" class="form-grid request-form">
+    <div class="form-field">
+      <label for="requestType">Request type</label>
+      <select id="requestType">
+        <option value="time_off">Time off</option>
+        <option value="availability_change">Availability change</option>
+        <option value="message">Message</option>
+      </select>
+    </div>
+    <div class="form-field">
+      <label for="requestStartDate">Start date</label>
+      <input id="requestStartDate" type="date" />
+    </div>
+    <div class="form-field">
+      <label for="requestEndDate">End date</label>
+      <input id="requestEndDate" type="date" />
+    </div>
+    <div class="form-field">
+      <label for="requestScope">Availability scope</label>
+      <select id="requestScope">
+        <option value="temporary">Temporary range</option>
+        <option value="permanent">Permanent change</option>
+      </select>
+    </div>
+    <div class="form-field full-span">
+      <label for="requestNote">Details</label>
+      <textarea id="requestNote" placeholder="Explain the time-off request, new availability, or your message"></textarea>
+    </div>
+    <div class="inline-form full-span">
+      <button type="submit" class="primary-button">Send request</button>
+    </div>
+  </form>`;
+}
+
+function renderInlineEmpty(text) {
+  return `<div class="empty-inline">${text}</div>`;
+}
+
+function renderHelpButton(text) {
+  return `<button type="button" class="help-button" data-help="${escapeHtml(text)}">?</button>`;
+}
+
+function renderLocationOption(location) {
+  return `<option value="${location.id}" ${state.filters.locationId === location.id ? "selected" : ""}>${location.name}</option>`;
+}
+
+function renderRoleOption(role) {
+  return `<option value="${role.id}" ${state.filters.roleId === role.id ? "selected" : ""}>${role.name}</option>`;
+}
+
+function handleCreateShift(event) {
+  event.preventDefault();
+  const newShift = {
+    id: `shift-${crypto.randomUUID()}`,
+    date: document.querySelector("#shiftDate").value,
+    locationId: document.querySelector("#shiftLocation").value,
+    employeeId: document.querySelector("#shiftEmployee").value,
+    roleId: document.querySelector("#shiftRole").value,
+    start: document.querySelector("#shiftStart").value,
+    end: document.querySelector("#shiftEnd").value,
+    status: "draft",
+    notes: document.querySelector("#shiftNotes").value.trim(),
+  };
+  state.appData.shifts.push(newShift);
+  persistAndRender("Shift added");
+}
+
+function publishVisibleShifts() {
+  const user = getCurrentUser();
+  state.appData.shifts = state.appData.shifts.map((shift) =>
+    getVisibleShifts(user).some((visible) => visible.id === shift.id) ? { ...shift, status: "published" } : shift
+  );
+  persistAndRender("Visible shifts published");
+}
+
+function copyLastWeek() {
+  const user = getCurrentUser();
+  const currentWeek = getWeekDates();
+  const previousWeek = getWeekDates(addDaysToIso(currentWeek[0], -7));
+  const sourceShifts = state.appData.shifts.filter((shift) => {
+    const inPreviousWeek = previousWeek.includes(shift.date);
+    const visibleLocation = user.role === "admin" || user.managedLocationIds.includes(shift.locationId);
+    return inPreviousWeek && visibleLocation;
+  });
+
+  const copied = sourceShifts.map((shift) => ({
+    ...shift,
+    id: `shift-${crypto.randomUUID()}`,
+    date: addDaysToIso(shift.date, 7),
+    status: "draft",
+  }));
+
+  state.appData.shifts.push(...copied);
+  persistAndRender(`Copied ${copied.length} shifts from last week`);
+}
+
+function handleCreateEmployee(event) {
+  event.preventDefault();
+  const locationId = document.querySelector("#employeeLocation").value;
+  const employee = {
+    id: `emp-${slugify(document.querySelector("#employeeName").value)}-${Date.now()}`,
+    name: document.querySelector("#employeeName").value.trim(),
+    email: document.querySelector("#employeeEmail").value.trim(),
+    phone: "",
+    roleId: document.querySelector("#employeeRole").value,
+    positionLabel: getRoleName(document.querySelector("#employeeRole").value),
+    locations: [locationId],
+    hourlyRate: Number(document.querySelector("#employeeRate").value),
+    weeklyHoursTarget: Number(document.querySelector("#employeeTargetHours").value),
+    tags: [],
+    availability: ["Open availability"],
+    notes: "",
+    externalEmployeeId: "",
+  };
+
+  state.appData.employees.push(employee);
+  state.appData.users.push({
+    id: `user-${employee.id}`,
+    name: employee.name,
+    email: employee.email,
+    role: "employee",
+    employeeId: employee.id,
+    managedLocationIds: [],
+  });
+  persistAndRender(`Added ${employee.name}`);
+}
+
+function handleUpdateOwnProfile(event) {
+  event.preventDefault();
+  const user = getCurrentUser();
+  const employee = getEmployeeByUser(user);
+  const next = {
+    ...employee,
+    name: document.querySelector("#profileName").value.trim(),
+    phone: document.querySelector("#profilePhone").value.trim(),
+    email: document.querySelector("#profileEmail").value.trim(),
+    notes: document.querySelector("#profileNotes").value.trim(),
+  };
+  replaceEmployee(next);
+  state.appData.users = state.appData.users.map((item) =>
+    item.id === user.id ? { ...item, name: next.name, email: next.email } : item
+  );
+  persistAndRender("Profile updated");
+}
+
+function handleCreateRequest(event) {
+  event.preventDefault();
+  const employee = getEmployeeByUser(getCurrentUser());
+  state.appData.requests.push({
+    id: `req-${crypto.randomUUID()}`,
+    employeeId: employee.id,
+    type: document.querySelector("#requestType").value,
+    status: "pending",
+    startDate: document.querySelector("#requestStartDate").value,
+    endDate: document.querySelector("#requestEndDate").value,
+    scope: document.querySelector("#requestScope").value,
+    note: document.querySelector("#requestNote").value.trim(),
+    createdAt: new Date().toISOString(),
+  });
+  persistAndRender("Request sent");
+}
+
+function updateRequestStatus(requestId, status) {
+  state.appData.requests = state.appData.requests.map((request) =>
+    request.id === requestId ? { ...request, status } : request
+  );
+  persistAndRender(`Request ${status}`);
+}
+
+function deleteEmployee(employeeId) {
+  const employee = getEmployee(employeeId);
+  state.appData.employees = state.appData.employees.filter((item) => item.id !== employeeId);
+  state.appData.users = state.appData.users.filter((item) => item.employeeId !== employeeId);
+  state.appData.shifts = state.appData.shifts.filter((item) => item.employeeId !== employeeId);
+  state.appData.requests = state.appData.requests.filter((item) => item.employeeId !== employeeId);
+  persistAndRender(`${employee?.name || "Employee"} removed`);
+}
+
+function openEmployeeEdit(employeeId) {
+  const employee = getEmployee(employeeId);
+  const nextName = window.prompt("Employee name", employee.name);
+  if (!nextName) {
+    return;
+  }
+  const nextEmail = window.prompt("Employee email", employee.email || "");
+  const nextPhone = window.prompt("Phone", employee.phone || "");
+  const nextPosition = window.prompt("Position label", employee.positionLabel || getRoleName(employee.roleId));
+  replaceEmployee({
+    ...employee,
+    name: nextName.trim(),
+    email: (nextEmail || "").trim(),
+    phone: (nextPhone || "").trim(),
+    positionLabel: (nextPosition || "").trim(),
+  });
+  state.appData.users = state.appData.users.map((item) =>
+    item.employeeId === employeeId ? { ...item, name: nextName.trim(), email: (nextEmail || "").trim() } : item
+  );
+  persistAndRender("Employee updated");
+}
+
+function saveBackendSettings() {
+  state.appData.meta.backend.provider = document.querySelector("#backendProvider").value;
+  state.appData.meta.backend.appsScriptUrl = document.querySelector("#appsScriptUrl").value.trim();
+  state.appData.meta.backend.sheetId = document.querySelector("#sheetId").value.trim();
+  persistAndRender(`Saved backend mode: ${state.appData.meta.backend.provider}`);
+}
+
+async function testHealthcheck() {
+  const url = document.querySelector("#appsScriptUrl").value.trim();
+  if (!url) {
+    window.alert("Add your Apps Script URL first.");
+    return;
+  }
+  try {
+    const result = await pingAppsScript(url);
+    window.alert(`Apps Script is reachable: ${JSON.stringify(result)}`);
+  } catch (error) {
+    window.alert(`Healthcheck failed: ${error.message}`);
+  }
+}
+
+async function maybeHydrateFromRemote() {
+  const backend = state.appData.meta.backend;
+  const currentUser = getCurrentUser();
+  if (backend.provider !== "appsScript" || !backend.appsScriptUrl || !currentUser?.email) {
+    return;
+  }
+  const remoteData = await fetchRemoteState(backend.appsScriptUrl, currentUser.email);
+  state.appData = mergeBackendConfig(remoteData, backend);
+  saveState(state.appData);
+  state.currentUserId = state.appData.users.find((user) => user.email === currentUser.email)?.id ?? state.appData.users[0]?.id ?? null;
+  state.lastSyncMessage = `Loaded remote data for ${currentUser.email}`;
+}
+
+async function loadFromRemote() {
+  const backend = state.appData.meta.backend;
+  const currentUser = getCurrentUser();
+  if (!backend.appsScriptUrl || !currentUser?.email) {
+    window.alert("Add backend settings and make sure the current user has an email.");
+    return;
+  }
+  try {
+    const remoteData = await fetchRemoteState(backend.appsScriptUrl, currentUser.email);
+    state.appData = mergeBackendConfig(remoteData, backend);
+    saveState(state.appData);
+    state.currentUserId = state.appData.users.find((user) => user.email === currentUser.email)?.id ?? state.appData.users[0]?.id ?? null;
+    state.lastSyncMessage = `Loaded remote data for ${currentUser.email}`;
+    render();
+  } catch (error) {
+    state.lastSyncMessage = `Remote load failed: ${error.message}`;
+    renderAlerts();
+  }
+}
+
+async function pushToRemote() {
+  const backend = state.appData.meta.backend;
+  const currentUser = getCurrentUser();
+  if (!backend.appsScriptUrl || !currentUser?.email) {
+    window.alert("Add backend settings and make sure the current user has an email.");
+    return;
+  }
+  try {
+    await syncRemoteState(backend.appsScriptUrl, state.appData, currentUser.email);
+    state.lastSyncMessage = `Synced local data to Google Apps Script as ${currentUser.email}`;
+    renderAlerts();
+  } catch (error) {
+    state.lastSyncMessage = `Remote sync failed: ${error.message}`;
+    renderAlerts();
+  }
+}
+
+function buildStatsForUser(user) {
+  if (user.role === "employee") {
+    const employee = getEmployeeByUser(user);
+    const shifts = getEmployeeShifts(employee.id);
+    const requests = getEmployeeRequests(employee.id);
+    return [
+      { label: "Upcoming shifts", value: shifts.length, note: "Visible on your profile" },
+      { label: "Primary location", value: employee.locations.length, note: employee.locations.map(getLocationName).join(", ") },
+      { label: "Open requests", value: requests.filter((item) => item.status === "pending").length, note: "Pending review" },
+      { label: "Weekly target", value: employee.weeklyHoursTarget, note: "Target hours" },
+    ];
+  }
+
+  const locations = getScopedLocations(user);
+  const shifts = getScopedShifts(user);
+  const employees = getScopedEmployees(user);
+  const requests = getScopedRequests(user);
+  return [
+    { label: "Locations", value: locations.length, note: locations.map((location) => location.name).join(", ") },
+    { label: "Employees", value: employees.length, note: "Visible to this role" },
+    { label: "Labor hours", value: shifts.reduce((sum, shift) => sum + calculateHours(shift.start, shift.end), 0).toFixed(1), note: "Scheduled this week" },
+    { label: "Pending requests", value: requests.filter((item) => item.status === "pending").length, note: "Need review" },
+  ];
 }
 
 function buildAlerts() {
   const user = getCurrentUser();
-  const visibleShifts = getVisibleShifts(user);
-  const draftCount = visibleShifts.filter((shift) => shift.status === "draft").length;
-  const unassignedLocations = user.managedLocationIds.filter(
-    (locationId) => !visibleShifts.some((shift) => shift.locationId === locationId)
-  );
-
   const alerts = [];
 
-  if (draftCount) {
-    alerts.push({
-      type: "warning",
-      title: `${draftCount} shifts are still drafts`,
-      body: "Use the publish action once your managers finish reviewing labor coverage and staffing notes.",
-    });
+  if (user.role !== "employee") {
+    const pendingRequests = getScopedRequests(user).filter((item) => item.status === "pending").length;
+    if (pendingRequests) {
+      alerts.push({
+        type: "warning",
+        title: `${pendingRequests} pending requests`,
+        body: "Review time-off and availability changes before finalizing next week’s schedule.",
+      });
+    }
   }
 
-  if (unassignedLocations.length) {
+  if (user.role === "employee") {
+    const open = getEmployeeRequests(getEmployeeByUser(user).id).filter((item) => item.status === "pending").length;
     alerts.push({
-      type: "warning",
-      title: "Some managed locations have no shifts this week",
-      body: `${unassignedLocations.map(getLocationName).join(", ")} still need schedule coverage.`,
+      type: "success",
+      title: "Employee self-service is active",
+      body: `${open} request(s) waiting for review. Use Requests to send time-off and availability updates.`,
     });
   }
-
-  alerts.push({
-    type: "success",
-    title: "Botte Employees integration path is already modeled",
-    body: "Employee records include external IDs so we can later sync people, PTO balances, and confirmations from your other app.",
-  });
 
   alerts.push({
     type: "success",
@@ -698,30 +1079,146 @@ function buildAlerts() {
   return alerts;
 }
 
+function bindHelpButtons() {
+  document.querySelectorAll("[data-help]").forEach((button) => {
+    button.addEventListener("click", () => {
+      window.alert(button.dataset.help);
+    });
+  });
+
+  document.querySelectorAll("[data-action='delete-shift']").forEach((button) => {
+    button.addEventListener("click", () => deleteShift(button.dataset.id));
+  });
+}
+
+function deleteShift(shiftId) {
+  state.appData.shifts = state.appData.shifts.filter((shift) => shift.id !== shiftId);
+  persistAndRender("Shift removed");
+}
+
+function persistAndRender(message) {
+  saveState(state.appData);
+  state.lastSyncMessage = message;
+  render();
+}
+
+function mergeBackendConfig(remoteData, backend) {
+  const next = cloneState(remoteData);
+  next.meta = next.meta || {};
+  next.meta.backend = {
+    provider: backend.provider,
+    appsScriptUrl: backend.appsScriptUrl,
+    sheetId: backend.sheetId,
+  };
+  return next;
+}
+
 function getVisiblePages() {
   const user = getCurrentUser();
   return Object.fromEntries(Object.entries(pages).filter(([, page]) => page.roles.includes(user.role)));
-}
-
-function getVisibleShifts(user) {
-  return state.appData.shifts.filter((shift) => {
-    const inManagedLocation = user.managedLocationIds.includes(shift.locationId);
-    const locationMatch = state.filters.locationId === "all" || shift.locationId === state.filters.locationId;
-    const roleMatch = state.filters.roleId === "all" || shift.roleId === state.filters.roleId;
-    return inManagedLocation && locationMatch && roleMatch;
-  });
 }
 
 function getCurrentUser() {
   return state.appData.users.find((user) => user.id === state.currentUserId) ?? state.appData.users[0];
 }
 
-function getUserLocationOptions(user) {
-  return state.appData.locations.filter((location) => user.managedLocationIds.includes(location.id));
+function getScopedLocations(user) {
+  if (user.role === "admin") {
+    return state.appData.locations;
+  }
+  if (user.role === "manager") {
+    return state.appData.locations.filter((location) => user.managedLocationIds.includes(location.id));
+  }
+  const employee = getEmployeeByUser(user);
+  return state.appData.locations.filter((location) => employee.locations.includes(location.id));
+}
+
+function getScopedEmployees(user) {
+  if (user.role === "admin") {
+    return state.appData.employees;
+  }
+  if (user.role === "manager") {
+    return state.appData.employees.filter((employee) =>
+      employee.locations.some((locationId) => user.managedLocationIds.includes(locationId))
+    );
+  }
+  const employee = getEmployeeByUser(user);
+  return employee ? [employee] : [];
+}
+
+function getScopedShifts(user) {
+  if (user.role === "employee") {
+    const employee = getEmployeeByUser(user);
+    return getEmployeeShifts(employee.id);
+  }
+  return state.appData.shifts.filter((shift) =>
+    user.role === "admin" ? true : user.managedLocationIds.includes(shift.locationId)
+  );
+}
+
+function getVisibleShifts(user) {
+  return getScopedShifts(user).filter((shift) => {
+    const locationMatch = state.filters.locationId === "all" || shift.locationId === state.filters.locationId;
+    const roleMatch = state.filters.roleId === "all" || shift.roleId === state.filters.roleId;
+    return locationMatch && roleMatch;
+  });
+}
+
+function getScopedRequests(user) {
+  if (user.role === "admin") {
+    return state.appData.requests;
+  }
+  if (user.role === "manager") {
+    const employeeIds = new Set(getScopedEmployees(user).map((employee) => employee.id));
+    return state.appData.requests.filter((request) => employeeIds.has(request.employeeId));
+  }
+  const employee = getEmployeeByUser(user);
+  return state.appData.requests.filter((request) => request.employeeId === employee.id);
+}
+
+function getEmployeeShifts(employeeId) {
+  return state.appData.shifts
+    .filter((shift) => shift.employeeId === employeeId)
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function getEmployeeRequests(employeeId) {
+  return state.appData.requests.filter((request) => request.employeeId === employeeId);
+}
+
+function getEmployee(employeeId) {
+  return state.appData.employees.find((employee) => employee.id === employeeId);
+}
+
+function getEmployeeByUser(user) {
+  return state.appData.employees.find((employee) => employee.id === user.employeeId) ?? state.appData.employees[0];
+}
+
+function replaceEmployee(nextEmployee) {
+  state.appData.employees = state.appData.employees.map((employee) =>
+    employee.id === nextEmployee.id ? nextEmployee : employee
+  );
+}
+
+function getRoleName(roleId) {
+  return state.appData.roles.find((role) => role.id === roleId)?.name ?? roleId;
 }
 
 function getLocationName(locationId) {
   return state.appData.locations.find((location) => location.id === locationId)?.name ?? locationId;
+}
+
+function humanizeRequestType(type) {
+  return type
+    .split("_")
+    .map(capitalize)
+    .join(" ");
+}
+
+function renderEmpty() {
+  const template = document.querySelector("#emptyStateTemplate");
+  el.viewRoot.innerHTML = "";
+  el.viewRoot.append(template.content.cloneNode(true));
 }
 
 function calculateHours(start, end) {
@@ -742,15 +1239,14 @@ function formatDate(dateString) {
   };
 }
 
-function capitalize(value) {
-  return value.charAt(0).toUpperCase() + value.slice(1);
+function addDaysToIso(dateString, amount) {
+  const date = new Date(`${dateString}T12:00:00`);
+  date.setDate(date.getDate() + amount);
+  return date.toISOString().slice(0, 10);
 }
 
-function escapeHtml(value) {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
+function capitalize(value) {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 function slugify(value) {
@@ -760,107 +1256,10 @@ function slugify(value) {
     .replace(/^-|-$/g, "");
 }
 
-async function maybeHydrateFromRemote() {
-  const backend = state.appData.meta.backend;
-  const currentUser = getCurrentUser();
-
-  if (backend.provider !== "appsScript" || !backend.appsScriptUrl || !currentUser?.email) {
-    return;
-  }
-
-  const remoteData = await fetchRemoteState(backend.appsScriptUrl, currentUser.email);
-  state.appData = mergeBackendConfig(remoteData, backend);
-  saveState(state.appData);
-  state.currentUserId = state.appData.users.find((user) => user.email === currentUser.email)?.id ?? state.appData.users[0]?.id ?? null;
-  state.lastSyncMessage = `Loaded remote data for ${currentUser.email}`;
-}
-
-async function loadFromRemote() {
-  const backend = state.appData.meta.backend;
-  const currentUser = getCurrentUser();
-
-  if (!backend.appsScriptUrl) {
-    window.alert("Add your Apps Script URL first.");
-    return;
-  }
-
-  if (!currentUser?.email) {
-    window.alert("Current user is missing an email.");
-    return;
-  }
-
-  state.isSyncing = true;
-  renderAlerts();
-
-  try {
-    const remoteData = await fetchRemoteState(backend.appsScriptUrl, currentUser.email);
-    state.appData = mergeBackendConfig(remoteData, backend);
-    saveState(state.appData);
-    state.currentUserId = state.appData.users.find((user) => user.email === currentUser.email)?.id ?? state.appData.users[0]?.id ?? null;
-    state.lastSyncMessage = `Loaded remote data for ${currentUser.email}`;
-    render();
-  } catch (error) {
-    state.lastSyncMessage = `Remote load failed: ${error.message}`;
-    renderAlerts();
-  } finally {
-    state.isSyncing = false;
-  }
-}
-
-async function pushToRemote() {
-  const backend = state.appData.meta.backend;
-  const currentUser = getCurrentUser();
-
-  if (!backend.appsScriptUrl) {
-    window.alert("Add your Apps Script URL first.");
-    return;
-  }
-
-  if (!currentUser?.email) {
-    window.alert("Current user is missing an email.");
-    return;
-  }
-
-  state.isSyncing = true;
-  renderAlerts();
-
-  try {
-    await syncRemoteState(backend.appsScriptUrl, state.appData, currentUser.email);
-    state.lastSyncMessage = `Synced local data to Google Apps Script as ${currentUser.email}`;
-    renderAlerts();
-  } catch (error) {
-    state.lastSyncMessage = `Remote sync failed: ${error.message}`;
-    renderAlerts();
-  } finally {
-    state.isSyncing = false;
-  }
-}
-
-function mergeBackendConfig(remoteData, backend) {
-  const next = cloneState(remoteData);
-  next.meta = next.meta || {};
-  next.meta.backend = {
-    provider: backend.provider,
-    appsScriptUrl: backend.appsScriptUrl,
-    sheetId: backend.sheetId,
-  };
-  return next;
-}
-
-function createSyncPayload() {
-  const cloned = cloneState(state.appData);
-  return {
-    action: "syncAll",
-    userEmail: getCurrentUser()?.email ?? "",
-    payload: {
-      meta: cloned.meta,
-      locations: cloned.locations,
-      roles: cloned.roles,
-      employees: cloned.employees,
-      shifts: cloned.shifts,
-      templates: cloned.templates,
-      locationSettings: cloned.locationSettings,
-      users: cloned.users,
-    },
-  };
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
 }
