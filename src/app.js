@@ -24,6 +24,7 @@ const state = {
     intervalId: null,
     inFlight: false,
     lastSignature: "",
+    suspendUntil: 0,
   },
 };
 
@@ -1716,7 +1717,7 @@ function bindHelpButtons() {
 
 function deleteShift(shiftId) {
   state.appData.shifts = state.appData.shifts.filter((shift) => shift.id !== shiftId);
-  persistAndRender("Shift removed");
+  persistAndRender("Shift removed", { type: "shift_draft_updated", shiftId });
 }
 
 function editShift(shiftId) {
@@ -1900,6 +1901,7 @@ function openUserAccessEdit(userId) {
 }
 
 function persistAndRender(message, context = {}) {
+  pauseLiveRefreshForContext(context);
   stampStateMeta(context);
   saveState(state.appData);
   state.lastSyncMessage = message;
@@ -2081,6 +2083,9 @@ async function refreshFromRemote({ silent = false, preserveMessage = false, forc
   if (!session?.email || backend?.provider !== "appsScript" || !backend?.appsScriptUrl || state.liveRefresh.inFlight) {
     return;
   }
+  if (!force && Date.now() < state.liveRefresh.suspendUntil) {
+    return;
+  }
   if (!force && shouldPauseLiveRefresh()) {
     return;
   }
@@ -2149,6 +2154,16 @@ function shouldForceRefreshAfterSync(context = {}) {
     "user_created",
     "profile_or_availability_updated",
   ].includes(context.type);
+}
+
+function pauseLiveRefreshForContext(context = {}) {
+  if (context.type === "shift_draft_updated") {
+    state.liveRefresh.suspendUntil = Date.now() + 8000;
+    return;
+  }
+  if (context.type === "schedule_submitted" || context.type === "schedule_approved" || context.type === "schedule_rejected") {
+    state.liveRefresh.suspendUntil = Date.now() + 3000;
+  }
 }
 
 function mergeBackendConfig(remoteData, backend) {
