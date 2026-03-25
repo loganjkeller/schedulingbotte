@@ -1,10 +1,9 @@
 import {
   authenticateRemoteUser,
-  createAppsScriptExample,
   fetchRemoteState,
-  pingAppsScript,
   syncRemoteState,
 } from "./googleAppsAdapter.js";
+import { APP_CONFIG } from "./config.js";
 import { cloneState, getWeekDates, loadState, saveState } from "./data.js";
 
 const SESSION_KEY = "botte-scheduling-session-v1";
@@ -74,7 +73,20 @@ init().catch((error) => {
   render();
 });
 
+function applyAppConfig() {
+  state.appData.meta = state.appData.meta || {};
+  state.appData.meta.backend = state.appData.meta.backend || {};
+  state.appData.meta.backend.provider = "appsScript";
+  if (APP_CONFIG.appsScriptUrl) {
+    state.appData.meta.backend.appsScriptUrl = APP_CONFIG.appsScriptUrl;
+  }
+  if (APP_CONFIG.sheetId) {
+    state.appData.meta.backend.sheetId = APP_CONFIG.sheetId;
+  }
+}
+
 async function init() {
+  applyAppConfig();
   state.currentUserId = state.session?.userId ?? null;
   await maybeHydrateFromRemoteWithSession();
   wireEvents();
@@ -124,10 +136,13 @@ function renderAccessGate() {
   el.accessGate.innerHTML = `
     <div class="access-card">
       <div class="access-brand">
-        <div class="access-logo">B</div>
+        <div class="access-logo-wrap">
+          <img src="${APP_CONFIG.logoPath}" alt="Botte logo" class="access-logo-image" onerror="this.style.display='none'; this.nextElementSibling.style.display='grid';" />
+          <div class="access-logo">B</div>
+        </div>
         <div>
           <p class="eyebrow">Botte access</p>
-          <h1>Botte Scheduling</h1>
+          <h1>${APP_CONFIG.brandName}</h1>
         </div>
       </div>
       <p class="access-title">Enter with last name and PIN</p>
@@ -186,7 +201,7 @@ function renderNav() {
 function renderHero() {
   const page = pages[state.currentView];
   el.pageTitle.textContent = page.title;
-  el.pageSubtitle.textContent = page.subtitle;
+  el.pageSubtitle.textContent = page.subtitle || "";
 }
 
 function renderStats() {
@@ -681,7 +696,6 @@ function renderProfileView() {
 }
 
 function renderSettingsView() {
-  const backend = state.appData.meta.backend;
   el.viewRoot.innerHTML = `
     <section class="panel">
       <div class="panel-header">
@@ -703,42 +717,9 @@ function renderSettingsView() {
           .join("")}
       </div>
     </section>
-    <section class="panel">
-      <div class="panel-header">
-        <div>
-          <h3>Live backend</h3>
-        </div>
-      </div>
-      <div class="form-grid">
-        <div class="form-field">
-          <label for="appsScriptUrl">Apps Script Web App URL</label>
-          <input id="appsScriptUrl" value="${backend.appsScriptUrl}" placeholder="https://script.google.com/macros/s/..." />
-        </div>
-        <div class="form-field">
-          <label for="sheetId">Google Sheet ID</label>
-          <input id="sheetId" value="${backend.sheetId}" placeholder="1abc..." />
-        </div>
-      </div>
-      <div class="inline-form top-gap">
-        <button type="button" class="primary-button" id="saveBackendButton">Save backend settings</button>
-        <button type="button" class="ghost-button" id="loadRemoteButton">Load remote data</button>
-        <button type="button" class="ghost-button" id="syncRemoteButton">Sync local to remote</button>
-        <button type="button" class="ghost-button" id="healthcheckButton">Test Apps Script endpoint</button>
-      </div>
-      <div class="summary-grid top-gap">
-        <article class="summary-card code-card">
-          <p class="eyebrow">Apps Script starter</p>
-          <pre>${escapeHtml(createAppsScriptExample())}</pre>
-        </article>
-      </div>
-    </section>
   `;
 
   document.querySelector("#saveLocationSettingsButton").addEventListener("click", saveLocationServiceSettings);
-  document.querySelector("#saveBackendButton").addEventListener("click", saveBackendSettings);
-  document.querySelector("#loadRemoteButton").addEventListener("click", loadFromRemote);
-  document.querySelector("#syncRemoteButton").addEventListener("click", pushToRemote);
-  document.querySelector("#healthcheckButton").addEventListener("click", testHealthcheck);
   bindHelpButtons();
 }
 
@@ -1146,13 +1127,6 @@ function openEmployeeEdit(employeeId) {
   persistAndRender("Employee updated");
 }
 
-function saveBackendSettings() {
-  state.appData.meta.backend.provider = "appsScript";
-  state.appData.meta.backend.appsScriptUrl = document.querySelector("#appsScriptUrl").value.trim();
-  state.appData.meta.backend.sheetId = document.querySelector("#sheetId").value.trim();
-  persistAndRender("Live backend settings saved");
-}
-
 async function handleAccessLogin(event) {
   event.preventDefault();
   const lastName = document.querySelector("#accessLastName").value.trim();
@@ -1182,20 +1156,6 @@ async function handleAccessLogin(event) {
   }
 }
 
-async function testHealthcheck() {
-  const url = document.querySelector("#appsScriptUrl").value.trim();
-  if (!url) {
-    window.alert("Add your Apps Script URL first.");
-    return;
-  }
-  try {
-    const result = await pingAppsScript(url);
-    window.alert(`Apps Script is reachable: ${JSON.stringify(result)}`);
-  } catch (error) {
-    window.alert(`Healthcheck failed: ${error.message}`);
-  }
-}
-
 async function maybeHydrateFromRemoteWithSession() {
   const backend = state.appData.meta.backend;
   const session = state.session;
@@ -1211,43 +1171,6 @@ async function maybeHydrateFromRemoteWithSession() {
     state.lastSyncMessage = "Access session expired. Please log in again.";
   } else {
     state.lastSyncMessage = `Loaded remote data for ${session.email}`;
-  }
-}
-
-async function loadFromRemote() {
-  const backend = state.appData.meta.backend;
-  const currentUser = getCurrentUser();
-  if (!backend.appsScriptUrl || !currentUser?.email) {
-    window.alert("Add backend settings and make sure the current user has an email.");
-    return;
-  }
-  try {
-    const remoteData = await fetchRemoteState(backend.appsScriptUrl, currentUser.email);
-    state.appData = mergeBackendConfig(remoteData, backend);
-    saveState(state.appData);
-    state.currentUserId = state.appData.users.find((user) => user.email === currentUser.email)?.id ?? state.appData.users[0]?.id ?? null;
-    state.lastSyncMessage = `Loaded remote data for ${currentUser.email}`;
-    render();
-  } catch (error) {
-    state.lastSyncMessage = `Remote load failed: ${error.message}`;
-    renderAlerts();
-  }
-}
-
-async function pushToRemote() {
-  const backend = state.appData.meta.backend;
-  const currentUser = getCurrentUser();
-  if (!backend.appsScriptUrl || !currentUser?.email) {
-    window.alert("Add backend settings and make sure the current user has an email.");
-    return;
-  }
-  try {
-    await syncRemoteState(backend.appsScriptUrl, state.appData, currentUser.email);
-    state.lastSyncMessage = `Synced local data to Google Apps Script as ${currentUser.email}`;
-    renderAlerts();
-  } catch (error) {
-    state.lastSyncMessage = `Remote sync failed: ${error.message}`;
-    renderAlerts();
   }
 }
 
@@ -1304,7 +1227,7 @@ function buildAlerts() {
     alerts.push({
       type: "success",
       title: "Status",
-      body: state.lastSyncMessage || "All changes are up to date.",
+      body: state.lastSyncMessage || "Workspace ready.",
     });
   }
 

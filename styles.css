@@ -68,11 +68,25 @@ textarea {
   margin-bottom: 18px;
 }
 
+.access-logo-wrap {
+  width: 96px;
+  height: 96px;
+  flex: 0 0 96px;
+  position: relative;
+}
+
+.access-logo-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
 .access-logo {
-  width: 78px;
-  height: 78px;
+  width: 100%;
+  height: 100%;
   border-radius: 22px;
-  display: grid;
+  display: none;
   place-items: center;
   background: #6f202d;
   color: #fff7f2;
@@ -146,6 +160,17 @@ textarea {
 
 .brand-block {
   padding: 4px 6px 10px;
+}
+
+.brand-logo-image {
+  width: 100%;
+  max-width: 150px;
+  height: auto;
+  display: block;
+}
+
+.brand-fallback {
+  display: none;
 }
 
 .eyebrow {
@@ -273,10 +298,11 @@ textarea {
 }
 
 .main-content {
-  padding: 18px 20px 28px;
+  padding: clamp(14px, 2vw, 22px);
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-width: 0;
 }
 
 .hero {
@@ -396,7 +422,7 @@ textarea {
 }
 
 .stats-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 10px;
 }
 
@@ -417,7 +443,7 @@ textarea {
 }
 
 .schedule-board {
-  grid-template-columns: repeat(7, minmax(180px, 1fr));
+  grid-template-columns: repeat(7, minmax(170px, 1fr));
   overflow-x: auto;
 }
 
@@ -474,11 +500,11 @@ textarea {
 }
 
 .wide-board {
-  grid-template-columns: repeat(7, minmax(240px, 1fr));
+  grid-template-columns: repeat(7, minmax(220px, 1fr));
 }
 
 .employee-week-grid {
-  grid-template-columns: repeat(7, minmax(220px, 1fr));
+  grid-template-columns: repeat(7, minmax(200px, 1fr));
   overflow-x: auto;
 }
 
@@ -710,8 +736,8 @@ textarea {
 }
 
 @media (max-width: 1220px) {
-  .stats-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .app-shell {
+    grid-template-columns: 180px 1fr;
   }
 }
 
@@ -730,6 +756,10 @@ textarea {
   .dual-grid {
     grid-template-columns: 1fr;
   }
+
+  .brand-logo-image {
+    max-width: 120px;
+  }
 }
 
 @media (max-width: 760px) {
@@ -747,10 +777,6 @@ textarea {
     flex-direction: column;
   }
 
-  .stats-grid {
-    grid-template-columns: 1fr;
-  }
-
   .schedule-board {
     grid-template-columns: 1fr;
   }
@@ -758,5 +784,19 @@ textarea {
   .wide-board,
   .employee-week-grid {
     grid-template-columns: 1fr;
+  }
+
+  .staff-scroll {
+    grid-auto-columns: 82%;
+  }
+
+  .access-brand {
+    align-items: flex-start;
+  }
+
+  .access-logo-wrap {
+    width: 72px;
+    height: 72px;
+    flex-basis: 72px;
   }
 }
