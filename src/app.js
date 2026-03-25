@@ -7,6 +7,7 @@ import { APP_CONFIG } from "./config.js";
 import { cloneState, getWeekDates, loadState, saveState } from "./data.js";
 
 const SESSION_KEY = "botte-scheduling-session-v1";
+const LIVE_REFRESH_INTERVAL_MS = 15000;
 
 const state = {
   appData: loadState(),
@@ -18,6 +19,11 @@ const state = {
   filters: {
     locationId: "all",
     roleId: "all",
+  },
+  liveRefresh: {
+    intervalId: null,
+    inFlight: false,
+    lastSignature: "",
   },
 };
 
@@ -91,22 +97,34 @@ async function init() {
   state.currentUserId = state.session?.userId ?? null;
   await maybeHydrateFromRemoteWithSession();
   state.appData = normalizeAppData(state.appData);
+  state.liveRefresh.lastSignature = getStateSignature(state.appData);
   wireEvents();
   render();
 }
 
 function wireEvents() {
   el.logoutButton.addEventListener("click", () => {
+    stopLiveRefresh();
     clearSession();
     render();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      void refreshFromRemote({ silent: true });
+    }
+  });
+  window.addEventListener("focus", () => {
+    void refreshFromRemote({ silent: true });
   });
 }
 
 function render() {
   if (!state.session) {
+    stopLiveRefresh();
     renderAccessGate();
     return;
   }
+  startLiveRefresh();
   showAppShell();
   ensureVisibleView();
   renderAccountSummary();
@@ -115,6 +133,7 @@ function render() {
   renderStats();
   renderAlerts();
   renderView();
+  state.liveRefresh.lastSignature = getStateSignature(state.appData);
 }
 
 function ensureVisibleView() {
@@ -406,7 +425,8 @@ function renderScheduleView() {
           <button type="button" class="ghost-button" id="prevWeekButton">Previous week</button>
           <button type="button" class="ghost-button" id="nextWeekButton">Next week</button>
           <button type="button" class="small-button" id="copyWeekButton">Copy last week</button>
-          <button type="button" class="small-button" id="quickPublish">Publish visible drafts</button>
+          <button type="button" class="small-button" id="quickPublish">${user.role === "admin" ? "Approve pending" : "Send for approval"}</button>
+          ${user.role === "admin" ? '<button type="button" class="ghost-button" id="rejectPendingButton">Reject pending</button>' : ""}
         </div>
       </div>
       <div class="filter-bar">
@@ -456,6 +476,9 @@ function renderScheduleView() {
     renderScheduleView();
   });
   document.querySelector("#quickPublish").addEventListener("click", publishVisibleShifts);
+  if (user.role === "admin") {
+    document.querySelector("#rejectPendingButton").addEventListener("click", rejectVisiblePendingShifts);
+  }
   document.querySelector("#copyWeekButton").addEventListener("click", copyLastWeek);
   document.querySelector("#prevWeekButton").addEventListener("click", () => {
     state.weekStartDate = addDaysToIso(state.weekStartDate, -7);
@@ -918,7 +941,9 @@ function renderStaffPlannerCard(employee, activeLocationId) {
 }
 
 function renderEmployeeDayServiceCard(date, locationId, locationSetting, employeeId) {
-  const shifts = state.appData.shifts.filter((shift) => shift.date === date && shift.locationId === locationId);
+  const shifts = state.appData.shifts.filter(
+    (shift) => shift.date === date && shift.locationId === locationId && shift.status === "published"
+  );
   const lunchShifts = shifts.filter((shift) => isShiftInService(shift, locationSetting, "lunch"));
   const dinnerShifts = shifts.filter((shift) => isShiftInService(shift, locationSetting, "dinner"));
   const label = formatDate(date);
@@ -1123,15 +1148,47 @@ function handleScheduleDrop(event) {
     status: "draft",
     notes: "",
   });
-  persistAndRender(`Added ${employee.name} to ${formatDate(date).weekday}`);
+  persistAndRender(`Added ${employee.name} to ${formatDate(date).weekday}`, {
+    type: "shift_draft_updated",
+    employeeId,
+    date,
+    locationId,
+  });
 }
 
 function publishVisibleShifts() {
   const user = getCurrentUser();
+  const sourceStatus = user.role === "admin" ? "pending_approval" : "draft";
+  const targetStatus = user.role === "admin" ? "published" : "pending_approval";
   state.appData.shifts = state.appData.shifts.map((shift) =>
-    getVisibleShifts(user).some((visible) => visible.id === shift.id) ? { ...shift, status: "published" } : shift
+    getVisibleShifts(user).some((visible) => visible.id === shift.id && visible.status === sourceStatus)
+      ? { ...shift, status: targetStatus }
+      : shift
   );
-  persistAndRender("Visible shifts published");
+  persistAndRender(
+    user.role === "admin" ? "Schedule approved and published" : "Schedule submitted for approval",
+    {
+      type: user.role === "admin" ? "schedule_approved" : "schedule_submitted",
+      weekStartDate: state.weekStartDate,
+      locationId: state.filters.locationId,
+    }
+  );
+}
+
+function rejectVisiblePendingShifts() {
+  openReasonModal("Reject schedule", "Reason for rejection", (reason) => {
+    state.appData.shifts = state.appData.shifts.map((shift) =>
+      getVisibleShifts(getCurrentUser()).some((visible) => visible.id === shift.id && visible.status === "pending_approval")
+        ? { ...shift, status: "draft", rejectionReason: reason }
+        : shift
+    );
+    persistAndRender("Schedule sent back to draft", {
+      type: "schedule_rejected",
+      weekStartDate: state.weekStartDate,
+      locationId: state.filters.locationId,
+      reason,
+    });
+  });
 }
 
 function copyLastWeek() {
@@ -1152,7 +1209,11 @@ function copyLastWeek() {
   }));
 
   state.appData.shifts.push(...copied);
-  persistAndRender(`Copied ${copied.length} shifts from last week`);
+  persistAndRender(`Copied ${copied.length} shifts from last week`, {
+    type: "shift_draft_updated",
+    weekStartDate: state.weekStartDate,
+    locationId: state.filters.locationId,
+  });
 }
 
 function handleCreateEmployee(event) {
@@ -1200,7 +1261,10 @@ function handleCreateEmployee(event) {
       managedLocationIds: accessType === "manager" ? [locationId] : [],
     });
   }
-  persistAndRender(`Added ${employee.name}`);
+  persistAndRender(`Added ${employee.name}`, {
+    type: createLogin ? "employee_and_user_created" : "employee_created",
+    employeeId: employee.id,
+  });
 }
 
 function handleCreateRole(event) {
@@ -1228,11 +1292,11 @@ function handleCreateAccessType(event) {
     state.appData.accessTypes = state.appData.accessTypes.map((item) =>
       item.id === key ? { ...item, name, description } : item
     );
-    persistAndRender(`Updated access type ${name}`);
+  persistAndRender(`Updated access type ${name}`, { type: "access_type_updated", accessType: key });
     return;
   }
   state.appData.accessTypes.push({ id: key, name, description });
-  persistAndRender(`Added access type ${name}`);
+  persistAndRender(`Added access type ${name}`, { type: "access_type_updated", accessType: key });
 }
 
 function handleCreateUser(event) {
@@ -1263,7 +1327,7 @@ function handleCreateUser(event) {
     employeeId,
     managedLocationIds,
   });
-  persistAndRender(`Created user ${name}`);
+  persistAndRender(`Created user ${name}`, { type: "user_created", email, role });
 }
 
 function toggleEmployeeAccessFields(enabled) {
@@ -1294,7 +1358,10 @@ function handleUpdateOwnProfile(event) {
   state.appData.users = state.appData.users.map((item) =>
     item.id === user.id ? { ...item, name: next.name, email: next.email } : item
   );
-  persistAndRender("Profile updated");
+  persistAndRender("Profile updated", {
+    type: "profile_or_availability_updated",
+    employeeId: employee.id,
+  });
 }
 
 function handleCreateRequest(event) {
@@ -1311,14 +1378,22 @@ function handleCreateRequest(event) {
     note: document.querySelector("#requestNote").value.trim(),
     createdAt: new Date().toISOString(),
   });
-  persistAndRender("Request sent");
+  persistAndRender("Request sent", {
+    type: "employee_request_created",
+    employeeId: employee.id,
+    requestType: document.querySelector("#requestType").value,
+  });
 }
 
 function updateRequestStatus(requestId, status) {
   state.appData.requests = state.appData.requests.map((request) =>
     request.id === requestId ? { ...request, status } : request
   );
-  persistAndRender(`Request ${status}`);
+  persistAndRender(`Request ${status}`, {
+    type: "request_status_changed",
+    requestId,
+    status,
+  });
 }
 
 function deleteEmployee(employeeId) {
@@ -1327,7 +1402,7 @@ function deleteEmployee(employeeId) {
   state.appData.users = state.appData.users.filter((item) => item.employeeId !== employeeId);
   state.appData.shifts = state.appData.shifts.filter((item) => item.employeeId !== employeeId);
   state.appData.requests = state.appData.requests.filter((item) => item.employeeId !== employeeId);
-  persistAndRender(`${employee?.name || "Employee"} removed`);
+  persistAndRender(`${employee?.name || "Employee"} removed`, { type: "employee_removed", employeeId });
 }
 
 function openEmployeeEdit(employeeId) {
@@ -1389,7 +1464,7 @@ function openEmployeeEdit(employeeId) {
         : item
     );
     closeModal();
-    persistAndRender("Employee updated");
+    persistAndRender("Employee updated", { type: "employee_updated", employeeId });
   });
 }
 
@@ -1560,7 +1635,7 @@ function editShift(shiftId) {
       item.id === shiftId ? { ...item, start, end } : item
     );
     closeModal();
-    persistAndRender("Shift updated");
+    persistAndRender("Shift updated", { type: "shift_draft_updated", shiftId });
   });
 }
 
@@ -1581,14 +1656,45 @@ function closeModal() {
   el.modalRoot.innerHTML = "";
 }
 
-function persistAndRender(message) {
+function openReasonModal(title, label, onSave) {
+  el.modalRoot.innerHTML = `
+    <div class="modal-overlay" data-close-modal="true">
+      <div class="modal-card modal-card-small" role="dialog" aria-modal="true">
+        <div class="panel-header">
+          <div><h3>${title}</h3></div>
+          <button type="button" class="icon-button" id="closeModalButton">×</button>
+        </div>
+        <form id="reasonForm" class="form-grid">
+          <div class="form-field full-span">
+            <label for="modalReason">${label}</label>
+            <textarea id="modalReason" placeholder="Add a short note"></textarea>
+          </div>
+          <div class="inline-form full-span">
+            <button type="button" class="ghost-button" id="cancelReason">Cancel</button>
+            <button type="submit" class="primary-button">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+  bindModalClose();
+  document.querySelector("#reasonForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const reason = document.querySelector("#modalReason").value.trim();
+    closeModal();
+    onSave(reason);
+  });
+}
+
+function persistAndRender(message, context = {}) {
+  stampStateMeta(context);
   saveState(state.appData);
   state.lastSyncMessage = message;
   render();
-  void syncIfLive();
+  void syncIfLive(context);
 }
 
-async function syncIfLive() {
+async function syncIfLive(context = {}) {
   const backend = state.appData.meta.backend;
   const currentUser = getCurrentUser();
   if (backend.provider !== "appsScript" || !backend.appsScriptUrl || !currentUser?.email) {
@@ -1596,8 +1702,14 @@ async function syncIfLive() {
   }
 
   try {
-    await syncRemoteState(backend.appsScriptUrl, state.appData, currentUser.email);
+    await syncRemoteState(backend.appsScriptUrl, state.appData, currentUser.email, {
+      actorEmail: currentUser.email,
+      actorName: currentUser.name,
+      actorRole: currentUser.role,
+      ...context,
+    });
     state.lastSyncMessage = "Live changes saved";
+    await refreshFromRemote({ silent: true, preserveMessage: true, force: true });
     renderAlerts();
   } catch (error) {
     state.lastSyncMessage = `Live sync failed: ${error.message}`;
@@ -1616,7 +1728,98 @@ function saveLocationServiceSettings() {
     });
     return { ...setting, ...updates };
   });
-  persistAndRender("Restaurant hours saved");
+  persistAndRender("Restaurant hours saved", {
+    type: "settings_updated",
+    locationIds: state.appData.locationSettings.map((setting) => setting.locationId),
+  });
+}
+
+function stampStateMeta(context = {}) {
+  state.appData.meta = state.appData.meta || {};
+  state.appData.meta.backend = state.appData.meta.backend || {};
+  state.appData.meta.syncedAt = new Date().toISOString();
+  state.appData.meta.lastAction = context.type || "manual_update";
+}
+
+function startLiveRefresh() {
+  const backend = state.appData.meta?.backend;
+  if (!state.session?.email || backend?.provider !== "appsScript" || !backend?.appsScriptUrl) {
+    stopLiveRefresh();
+    return;
+  }
+  if (state.liveRefresh.intervalId) {
+    return;
+  }
+  state.liveRefresh.intervalId = window.setInterval(() => {
+    void refreshFromRemote({ silent: true });
+  }, LIVE_REFRESH_INTERVAL_MS);
+}
+
+function stopLiveRefresh() {
+  if (!state.liveRefresh.intervalId) {
+    return;
+  }
+  window.clearInterval(state.liveRefresh.intervalId);
+  state.liveRefresh.intervalId = null;
+}
+
+async function refreshFromRemote({ silent = false, preserveMessage = false, force = false } = {}) {
+  const backend = state.appData.meta?.backend;
+  const session = state.session;
+  if (!session?.email || backend?.provider !== "appsScript" || !backend?.appsScriptUrl || state.liveRefresh.inFlight) {
+    return;
+  }
+  if (!force && shouldPauseLiveRefresh()) {
+    return;
+  }
+
+  state.liveRefresh.inFlight = true;
+  try {
+    const remoteData = await fetchRemoteState(backend.appsScriptUrl, session.email);
+    const merged = mergeBackendConfig(remoteData, backend);
+    const signature = getStateSignature(merged);
+
+    if (signature === state.liveRefresh.lastSignature) {
+      return;
+    }
+
+    state.appData = merged;
+    saveState(state.appData);
+    state.currentUserId = state.appData.users.find((user) => user.email === session.email)?.id ?? null;
+
+    if (!state.currentUserId) {
+      stopLiveRefresh();
+      clearSession();
+      state.lastSyncMessage = "Access session expired. Please log in again.";
+      render();
+      return;
+    }
+
+    state.liveRefresh.lastSignature = signature;
+    if (!silent && !preserveMessage) {
+      state.lastSyncMessage = "Workspace refreshed";
+    }
+    render();
+  } catch (error) {
+    if (!silent) {
+      state.lastSyncMessage = `Live refresh failed: ${error.message}`;
+      renderAlerts();
+    }
+  } finally {
+    state.liveRefresh.inFlight = false;
+  }
+}
+
+function shouldPauseLiveRefresh() {
+  if (el.modalRoot.innerHTML.trim()) {
+    return true;
+  }
+  const activeTag = document.activeElement?.tagName;
+  return activeTag === "INPUT" || activeTag === "TEXTAREA" || activeTag === "SELECT";
+}
+
+function getStateSignature(appData) {
+  return JSON.stringify(normalizeAppData(appData));
 }
 
 function mergeBackendConfig(remoteData, backend) {
@@ -1726,7 +1929,7 @@ function getScopedEmployees(user) {
 function getScopedShifts(user) {
   if (user.role === "employee") {
     const employee = getEmployeeByUser(user);
-    return getEmployeeShifts(employee.id);
+    return getEmployeeShifts(employee.id).filter((shift) => shift.status === "published");
   }
   return state.appData.shifts.filter((shift) =>
     user.role === "admin" ? true : user.managedLocationIds.includes(shift.locationId)
