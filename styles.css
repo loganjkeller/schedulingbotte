@@ -383,7 +383,9 @@ textarea {
 .list-grid,
 .form-grid,
 .filter-bar,
-.schedule-board {
+.schedule-board,
+.schedule-layout,
+.staff-list {
   display: grid;
   gap: 14px;
 }
@@ -412,6 +414,39 @@ textarea {
 .schedule-board {
   grid-template-columns: repeat(7, minmax(180px, 1fr));
   overflow-x: auto;
+}
+
+.schedule-layout {
+  grid-template-columns: 280px 1fr;
+  align-items: start;
+}
+
+.employee-bank {
+  position: sticky;
+  top: 12px;
+  align-self: start;
+}
+
+.staff-list {
+  gap: 10px;
+}
+
+.staff-card {
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.8);
+  cursor: grab;
+}
+
+.staff-card:active {
+  cursor: grabbing;
+}
+
+.staff-note {
+  margin: 10px 0 0;
+  color: var(--accent-deep);
+  font-size: 0.88rem;
 }
 
 .view-root {
@@ -546,6 +581,21 @@ textarea {
   border-style: solid;
 }
 
+.dropzone {
+  min-height: 160px;
+  padding: 4px;
+  border-radius: 12px;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.dropzone:hover {
+  background: rgba(180, 99, 61, 0.04);
+}
+
+.compact-header {
+  margin-bottom: 10px;
+}
+
 .stack-list {
   font-size: 0.9rem;
 }
@@ -637,5 +687,13 @@ textarea {
 
   .schedule-board {
     grid-template-columns: 1fr;
+  }
+
+  .schedule-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .employee-bank {
+    position: static;
   }
 }

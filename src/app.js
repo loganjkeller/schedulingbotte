@@ -5,7 +5,7 @@ import {
   pingAppsScript,
   syncRemoteState,
 } from "./googleAppsAdapter.js";
-import { cloneState, getWeekDates, loadState, resetState, saveState } from "./data.js";
+import { cloneState, getWeekDates, loadState, saveState } from "./data.js";
 
 const SESSION_KEY = "botte-scheduling-session-v1";
 
@@ -65,8 +65,6 @@ const el = {
   statsGrid: document.querySelector("#statsGrid"),
   alerts: document.querySelector("#alerts"),
   viewRoot: document.querySelector("#viewRoot"),
-  seedButton: document.querySelector("#seedButton"),
-  exportButton: document.querySelector("#exportButton"),
   logoutButton: document.querySelector("#logoutButton"),
 };
 
@@ -83,23 +81,6 @@ async function init() {
 }
 
 function wireEvents() {
-  el.seedButton.addEventListener("click", () => {
-    state.appData = resetState();
-    clearSession();
-    state.lastSyncMessage = "Demo data reset";
-    render();
-  });
-
-  el.exportButton.addEventListener("click", () => {
-    const blob = new Blob([JSON.stringify(state.appData, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `botte-scheduling-${new Date().toISOString().slice(0, 10)}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
-  });
-
   el.logoutButton.addEventListener("click", () => {
     clearSession();
     render();
@@ -378,18 +359,22 @@ function renderScheduleView() {
   const user = getCurrentUser();
   const weekDates = getWeekDates();
   const locationOptions = getScopedLocations(user);
-  const roleOptions = state.appData.roles;
-  const employeeOptions = getScopedEmployees(user);
+  if (state.filters.locationId === "all" && locationOptions[0]) {
+    state.filters.locationId = locationOptions[0].id;
+  }
+  const activeLocationId = state.filters.locationId === "all" ? locationOptions[0]?.id : state.filters.locationId;
+  const employeeOptions = getScopedEmployees(user).filter((employee) =>
+    activeLocationId ? employee.locations.includes(activeLocationId) : true
+  );
 
   el.viewRoot.innerHTML = `
     <section class="panel">
       <div class="panel-header">
         <div>
           <h3>Weekly planner</h3>
-          <p class="muted">Build the schedule by location, then publish when the week is ready.</p>
         </div>
         <div class="action-row">
-          ${renderHelpButton("Copy last week duplicates the previous week's shifts and moves them forward by 7 days. Publish turns visible draft shifts into published shifts.")}
+          ${renderHelpButton("Pick a location, then drag an employee card into any day column. Their availability and pending requests stay visible while you schedule.")}
           <button type="button" class="small-button" id="copyWeekButton">Copy last week</button>
           <button type="button" class="small-button" id="quickPublish">Publish visible drafts</button>
         </div>
@@ -398,7 +383,6 @@ function renderScheduleView() {
         <div class="form-field">
           <label for="locationFilter">Location</label>
           <select id="locationFilter">
-            <option value="all">All visible locations</option>
             ${locationOptions.map(renderLocationOption).join("")}
           </select>
         </div>
@@ -406,58 +390,30 @@ function renderScheduleView() {
           <label for="roleFilter">Position</label>
           <select id="roleFilter">
             <option value="all">All positions</option>
-            ${roleOptions.map(renderRoleOption).join("")}
+            ${state.appData.roles.map(renderRoleOption).join("")}
           </select>
         </div>
       </div>
-      <div class="schedule-board">
-        ${weekDates.map((date) => renderDayColumn(date, user)).join("")}
-      </div>
-    </section>
-    <section class="panel">
-      <div class="panel-header">
-        <div>
-          <h3>Add shift</h3>
-          <p class="muted">A simple scheduling form for managers and admin.</p>
+      <div class="schedule-layout">
+        <aside class="employee-bank">
+          <div class="panel-header compact-header">
+            <div>
+              <h3>Available staff</h3>
+            </div>
+            ${renderHelpButton("Each card shows position, assigned hours, permanent availability, and pending requests. Drag a card into a day to create a draft shift.")}
+          </div>
+          <div class="staff-list">
+            ${employeeOptions.map((employee) => renderStaffPlannerCard(employee, activeLocationId)).join("") || renderInlineEmpty("No employees for this location.")}
+          </div>
+        </aside>
+        <div class="schedule-board">
+          ${weekDates.map((date) => renderDayColumn(date, user, activeLocationId)).join("")}
         </div>
       </div>
-      <form id="shiftForm" class="form-grid">
-        <div class="form-field">
-          <label for="shiftDate">Date</label>
-          <select id="shiftDate">${weekDates.map((date) => `<option value="${date}">${formatDate(date).weekday} · ${date}</option>`).join("")}</select>
-        </div>
-        <div class="form-field">
-          <label for="shiftLocation">Location</label>
-          <select id="shiftLocation">${locationOptions.map((location) => `<option value="${location.id}">${location.name}</option>`).join("")}</select>
-        </div>
-        <div class="form-field">
-          <label for="shiftEmployee">Employee</label>
-          <select id="shiftEmployee">${employeeOptions.map((employee) => `<option value="${employee.id}">${employee.name}</option>`).join("")}</select>
-        </div>
-        <div class="form-field">
-          <label for="shiftRole">Position</label>
-          <select id="shiftRole">${roleOptions.map((role) => `<option value="${role.id}">${role.name}</option>`).join("")}</select>
-        </div>
-        <div class="form-field">
-          <label for="shiftStart">Start</label>
-          <input id="shiftStart" type="time" value="16:00" />
-        </div>
-        <div class="form-field">
-          <label for="shiftEnd">End</label>
-          <input id="shiftEnd" type="time" value="22:00" />
-        </div>
-        <div class="form-field full-span">
-          <label for="shiftNotes">Notes</label>
-          <textarea id="shiftNotes" placeholder="Section, prep notes, opening, closing, event details"></textarea>
-        </div>
-        <div class="inline-form full-span">
-          <button type="submit" class="primary-button">Add shift</button>
-        </div>
-      </form>
     </section>
   `;
 
-  document.querySelector("#locationFilter").value = state.filters.locationId;
+  document.querySelector("#locationFilter").value = activeLocationId;
   document.querySelector("#roleFilter").value = state.filters.roleId;
   document.querySelector("#locationFilter").addEventListener("change", (event) => {
     state.filters.locationId = event.target.value;
@@ -469,7 +425,13 @@ function renderScheduleView() {
   });
   document.querySelector("#quickPublish").addEventListener("click", publishVisibleShifts);
   document.querySelector("#copyWeekButton").addEventListener("click", copyLastWeek);
-  document.querySelector("#shiftForm").addEventListener("submit", handleCreateShift);
+  document.querySelectorAll("[draggable='true']").forEach((card) => {
+    card.addEventListener("dragstart", handleEmployeeDragStart);
+  });
+  document.querySelectorAll("[data-drop-date]").forEach((zone) => {
+    zone.addEventListener("dragover", (event) => event.preventDefault());
+    zone.addEventListener("drop", handleScheduleDrop);
+  });
   bindHelpButtons();
 }
 
@@ -614,6 +576,10 @@ function renderProfileView() {
           <label for="profileNotes">Notes</label>
           <input id="profileNotes" value="${employee.notes || ""}" />
         </div>
+        <div class="form-field full-span">
+          <label for="profileAvailability">Availability</label>
+          <textarea id="profileAvailability" placeholder="Example: Monday lunch, Tuesday off, Friday closing only">${(employee.availability || []).join("\n")}</textarea>
+        </div>
         <div class="inline-form full-span">
           <button type="submit" class="primary-button">Save profile</button>
         </div>
@@ -660,18 +626,10 @@ function renderSettingsView() {
     <section class="panel">
       <div class="panel-header">
         <div>
-          <h3>Backend connector</h3>
-          <p class="muted">Keep local demo mode for testing or connect to Google Apps Script for live Sheets data.</p>
+          <h3>Live backend</h3>
         </div>
       </div>
       <div class="form-grid">
-        <div class="form-field">
-          <label for="backendProvider">Backend mode</label>
-          <select id="backendProvider">
-            <option value="localStorage" ${backend.provider === "localStorage" ? "selected" : ""}>Local demo storage</option>
-            <option value="appsScript" ${backend.provider === "appsScript" ? "selected" : ""}>Google Apps Script + Sheets</option>
-          </select>
-        </div>
         <div class="form-field">
           <label for="appsScriptUrl">Apps Script Web App URL</label>
           <input id="appsScriptUrl" value="${backend.appsScriptUrl}" placeholder="https://script.google.com/macros/s/..." />
@@ -703,15 +661,15 @@ function renderSettingsView() {
   bindHelpButtons();
 }
 
-function renderDayColumn(date, user) {
-  const shifts = getVisibleShifts(user).filter((shift) => shift.date === date);
+function renderDayColumn(date, user, activeLocationId) {
+  const shifts = getVisibleShifts(user).filter((shift) => shift.date === date && shift.locationId === activeLocationId);
   const label = formatDate(date);
   return `<article class="schedule-card">
     <header>
       <h3>${label.weekday}</h3>
       <p class="muted">${label.fullDate}</p>
     </header>
-    <div class="shift-stack">
+    <div class="shift-stack dropzone" data-drop-date="${date}" data-drop-location="${activeLocationId}">
       ${shifts.map(renderShiftCard).join("") || renderInlineEmpty("No shifts")}
     </div>
   </article>`;
@@ -722,14 +680,13 @@ function renderShiftCard(shift) {
   return `<article class="shift-card">
     <div class="shift-head">
       <strong>${employee?.name || "Unknown employee"}</strong>
-      <button type="button" class="icon-button" data-action="delete-shift" data-id="${shift.id}">Remove</button>
+      <button type="button" class="icon-button" data-action="delete-shift" data-id="${shift.id}">×</button>
     </div>
-    <p class="muted">${getLocationName(shift.locationId)} · ${getRoleName(shift.roleId)}</p>
+    <p class="muted">${getRoleName(shift.roleId)}</p>
     <div class="pill-row">
       <span class="pill">${shift.start} - ${shift.end}</span>
       <span class="pill ${shift.status === "published" ? "accent" : "warning"}">${capitalize(shift.status)}</span>
     </div>
-    <p class="kpi-note">${shift.notes || "No notes"}</p>
   </article>`;
 }
 
@@ -755,6 +712,24 @@ function renderEmployeeListCard(employee) {
   return `<article class="list-card">
     <strong>${employee.name}</strong>
     <p class="muted">${getRoleName(employee.roleId)} · ${employee.locations.map(getLocationName).join(", ")}</p>
+  </article>`;
+}
+
+function renderStaffPlannerCard(employee, activeLocationId) {
+  const assignedHours = state.appData.shifts
+    .filter((shift) => shift.employeeId === employee.id && shift.locationId === activeLocationId)
+    .reduce((sum, shift) => sum + calculateHours(shift.start, shift.end), 0);
+  const pendingAvailability = state.appData.requests.find(
+    (request) => request.employeeId === employee.id && request.type === "availability_change" && request.status === "pending"
+  );
+  return `<article class="staff-card" draggable="true" data-employee-id="${employee.id}">
+    <div class="shift-head">
+      <strong>${employee.name}</strong>
+      <span class="pill">${assignedHours.toFixed(1)}h</span>
+    </div>
+    <p class="muted">${employee.positionLabel || getRoleName(employee.roleId)}</p>
+    <p class="kpi-note">Availability: ${(employee.availability || []).join(" · ") || "Not set"}</p>
+    ${pendingAvailability ? `<p class="staff-note">Pending change: ${pendingAvailability.note}</p>` : ""}
   </article>`;
 }
 
@@ -876,6 +851,34 @@ function handleCreateShift(event) {
   persistAndRender("Shift added");
 }
 
+function handleEmployeeDragStart(event) {
+  event.dataTransfer.setData("text/plain", event.currentTarget.dataset.employeeId);
+}
+
+function handleScheduleDrop(event) {
+  event.preventDefault();
+  const employeeId = event.dataTransfer.getData("text/plain");
+  const date = event.currentTarget.dataset.dropDate;
+  const locationId = event.currentTarget.dataset.dropLocation;
+  const employee = getEmployee(employeeId);
+  if (!employee || !date || !locationId) {
+    return;
+  }
+
+  state.appData.shifts.push({
+    id: `shift-${crypto.randomUUID()}`,
+    date,
+    locationId,
+    employeeId,
+    roleId: employee.roleId,
+    start: "16:00",
+    end: "22:00",
+    status: "draft",
+    notes: "",
+  });
+  persistAndRender(`Added ${employee.name} to ${formatDate(date).weekday}`);
+}
+
 function publishVisibleShifts() {
   const user = getCurrentUser();
   state.appData.shifts = state.appData.shifts.map((shift) =>
@@ -948,6 +951,10 @@ function handleUpdateOwnProfile(event) {
     phone: document.querySelector("#profilePhone").value.trim(),
     email: document.querySelector("#profileEmail").value.trim(),
     notes: document.querySelector("#profileNotes").value.trim(),
+    availability: document.querySelector("#profileAvailability").value
+      .split("\n")
+      .map((item) => item.trim())
+      .filter(Boolean),
   };
   replaceEmployee(next);
   state.appData.users = state.appData.users.map((item) =>
@@ -1014,10 +1021,10 @@ function openEmployeeEdit(employeeId) {
 }
 
 function saveBackendSettings() {
-  state.appData.meta.backend.provider = document.querySelector("#backendProvider").value;
+  state.appData.meta.backend.provider = "appsScript";
   state.appData.meta.backend.appsScriptUrl = document.querySelector("#appsScriptUrl").value.trim();
   state.appData.meta.backend.sheetId = document.querySelector("#sheetId").value.trim();
-  persistAndRender(`Saved backend mode: ${state.appData.meta.backend.provider}`);
+  persistAndRender("Live backend settings saved");
 }
 
 async function handleAccessLogin(event) {
@@ -1197,6 +1204,24 @@ function persistAndRender(message) {
   saveState(state.appData);
   state.lastSyncMessage = message;
   render();
+  void syncIfLive();
+}
+
+async function syncIfLive() {
+  const backend = state.appData.meta.backend;
+  const currentUser = getCurrentUser();
+  if (backend.provider !== "appsScript" || !backend.appsScriptUrl || !currentUser?.email) {
+    return;
+  }
+
+  try {
+    await syncRemoteState(backend.appsScriptUrl, state.appData, currentUser.email);
+    state.lastSyncMessage = "Live changes saved";
+    renderAlerts();
+  } catch (error) {
+    state.lastSyncMessage = `Live sync failed: ${error.message}`;
+    renderAlerts();
+  }
 }
 
 function mergeBackendConfig(remoteData, backend) {
