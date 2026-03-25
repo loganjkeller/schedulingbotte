@@ -1,4 +1,4 @@
-const STORAGE_KEY = "botte-scheduling-state-v2";
+const STORAGE_KEY = "botte-scheduling-state-v3";
 
 const today = new Date();
 
@@ -40,6 +40,12 @@ export function createSeedState() {
     { id: "role-line", name: "Line Cook", color: "#7e4033" },
     { id: "role-host", name: "Host", color: "#b88637" },
     { id: "role-runner", name: "Food Runner", color: "#4d7b62" },
+  ];
+
+  const accessTypes = [
+    { id: "admin", name: "Admin", description: "Full access to everything." },
+    { id: "manager", name: "Manager", description: "Manages staff and scheduling for assigned locations." },
+    { id: "employee", name: "Employee", description: "Views schedule, profile, and requests." },
   ];
 
   const employees = [
@@ -356,7 +362,7 @@ export function createSeedState() {
 
   return {
     meta: {
-      version: 2,
+      version: 3,
       seededAt: new Date().toISOString(),
       mode: "local-demo",
       backend: {
@@ -367,6 +373,7 @@ export function createSeedState() {
     },
     locations,
     roles,
+    accessTypes,
     employees,
     shifts,
     templates,
@@ -386,7 +393,7 @@ export function loadState() {
 
   try {
     const parsed = JSON.parse(raw);
-    if (!parsed.requests || !parsed.meta || parsed.meta.version !== 2) {
+    if (!parsed.requests || !parsed.accessTypes || !parsed.meta || parsed.meta.version !== 3) {
       const seed = createSeedState();
       saveState(seed);
       return seed;

@@ -579,6 +579,23 @@ function renderPeopleView() {
           <label for="employeeTargetHours">Weekly target</label>
           <input id="employeeTargetHours" type="number" min="0" step="1" value="32" />
         </div>
+        <div class="form-field">
+          <label for="createLogin">Create user access</label>
+          <select id="createLogin">
+            <option value="no">No</option>
+            <option value="yes">Yes</option>
+          </select>
+        </div>
+        <div class="form-field">
+          <label for="employeeAccessType">Access type</label>
+          <select id="employeeAccessType">
+            ${state.appData.accessTypes.map((type) => `<option value="${type.id}">${type.name}</option>`).join("")}
+          </select>
+        </div>
+        <div class="form-field">
+          <label for="employeePin">PIN</label>
+          <input id="employeePin" inputmode="numeric" placeholder="1234" />
+        </div>
         <div class="inline-form full-span">
           <button type="submit" class="primary-button">Add employee</button>
         </div>
@@ -717,9 +734,104 @@ function renderSettingsView() {
           .join("")}
       </div>
     </section>
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h3>Position roles</h3>
+        </div>
+      </div>
+      <div class="summary-grid">
+        ${state.appData.roles.map(renderPositionRoleCard).join("")}
+      </div>
+      <form id="roleForm" class="form-grid top-gap">
+        <div class="form-field">
+          <label for="roleName">Role name</label>
+          <input id="roleName" placeholder="Sommelier" />
+        </div>
+        <div class="form-field">
+          <label for="roleColor">Color</label>
+          <input id="roleColor" type="color" value="#9b5f3f" />
+        </div>
+        <div class="inline-form full-span">
+          <button type="submit" class="primary-button">Add role</button>
+        </div>
+      </form>
+    </section>
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h3>Access types and users</h3>
+        </div>
+      </div>
+      <div class="summary-grid">
+        ${state.appData.accessTypes.map(renderAccessTypeCard).join("")}
+      </div>
+      <form id="accessTypeForm" class="form-grid top-gap">
+        <div class="form-field">
+          <label for="accessTypeName">Access label</label>
+          <input id="accessTypeName" placeholder="Regional Manager" />
+        </div>
+        <div class="form-field">
+          <label for="accessTypeKey">System key</label>
+          <select id="accessTypeKey">
+            <option value="admin">Admin permissions</option>
+            <option value="manager">Manager permissions</option>
+            <option value="employee">Employee permissions</option>
+          </select>
+        </div>
+        <div class="form-field full-span">
+          <label for="accessTypeDescription">Description</label>
+          <input id="accessTypeDescription" placeholder="Can manage assigned locations" />
+        </div>
+        <div class="inline-form full-span">
+          <button type="submit" class="primary-button">Add access type</button>
+        </div>
+      </form>
+      <form id="userForm" class="form-grid top-gap">
+        <div class="form-field">
+          <label for="userName">User name</label>
+          <input id="userName" placeholder="New Manager" />
+        </div>
+        <div class="form-field">
+          <label for="userLastName">Last name</label>
+          <input id="userLastName" placeholder="Romano" />
+        </div>
+        <div class="form-field">
+          <label for="userEmail">Email</label>
+          <input id="userEmail" placeholder="manager@botte.com" />
+        </div>
+        <div class="form-field">
+          <label for="userPin">PIN</label>
+          <input id="userPin" inputmode="numeric" placeholder="1234" />
+        </div>
+        <div class="form-field">
+          <label for="userAccessType">Access type</label>
+          <select id="userAccessType">
+            ${state.appData.accessTypes.map((type) => `<option value="${type.id}">${type.name}</option>`).join("")}
+          </select>
+        </div>
+        <div class="form-field">
+          <label for="userEmployeeLink">Linked employee</label>
+          <select id="userEmployeeLink">
+            <option value="">None</option>
+            ${state.appData.employees.map((employee) => `<option value="${employee.id}">${employee.name}</option>`).join("")}
+          </select>
+        </div>
+        <div class="form-field full-span">
+          <label for="userManagedLocations">Managed locations</label>
+          <input id="userManagedLocations" placeholder="loc-nolita,loc-soho" />
+        </div>
+        <div class="inline-form full-span">
+          <button type="submit" class="primary-button">Create user</button>
+        </div>
+      </form>
+    </section>
   `;
 
   document.querySelector("#saveLocationSettingsButton").addEventListener("click", saveLocationServiceSettings);
+  document.querySelector("#roleForm").addEventListener("submit", handleCreateRole);
+  document.querySelector("#accessTypeForm").addEventListener("submit", handleCreateAccessType);
+  document.querySelector("#userForm").addEventListener("submit", handleCreateUser);
   bindHelpButtons();
 }
 
@@ -882,11 +994,32 @@ function renderLocationSettingsCard(location) {
 }
 
 function renderUserAccessCard(user) {
+  const accessType = state.appData.accessTypes.find((item) => item.id === user.role);
   return `<article class="summary-card">
-    <p class="eyebrow">${capitalize(user.role)}</p>
+    <p class="eyebrow">${accessType?.name || capitalize(user.role)}</p>
     <h3>${user.name}</h3>
     <p class="muted">${user.email}</p>
     <p class="kpi-note">${(user.managedLocationIds || []).map(getLocationName).join(", ") || "No assigned locations"}</p>
+  </article>`;
+}
+
+function renderPositionRoleCard(role) {
+  return `<article class="summary-card">
+    <h3>${role.name}</h3>
+    <div class="tag-row">
+      <span class="tag">${role.id}</span>
+      <span class="tag">${role.color}</span>
+    </div>
+  </article>`;
+}
+
+function renderAccessTypeCard(type) {
+  return `<article class="summary-card">
+    <h3>${type.name}</h3>
+    <p class="muted">${type.description || ""}</p>
+    <div class="tag-row">
+      <span class="tag">${type.id}</span>
+    </div>
   </article>`;
 }
 
@@ -1018,6 +1151,9 @@ function copyLastWeek() {
 function handleCreateEmployee(event) {
   event.preventDefault();
   const locationId = document.querySelector("#employeeLocation").value;
+  const createLogin = document.querySelector("#createLogin").value === "yes";
+  const accessType = document.querySelector("#employeeAccessType").value;
+  const pin = document.querySelector("#employeePin").value.trim() || "0000";
   const employee = {
     id: `emp-${slugify(document.querySelector("#employeeName").value)}-${Date.now()}`,
     name: document.querySelector("#employeeName").value.trim(),
@@ -1035,17 +1171,81 @@ function handleCreateEmployee(event) {
   };
 
   state.appData.employees.push(employee);
-  state.appData.users.push({
-    id: `user-${employee.id}`,
-    name: employee.name,
-    lastName: getLastName(employee.name),
-    pin: "0000",
-    email: employee.email,
-    role: "employee",
-    employeeId: employee.id,
-    managedLocationIds: [],
-  });
+  if (createLogin) {
+    state.appData.users.push({
+      id: `user-${employee.id}`,
+      name: employee.name,
+      lastName: getLastName(employee.name),
+      pin,
+      email: employee.email,
+      role: accessType,
+      employeeId: employee.id,
+      managedLocationIds: accessType === "manager" ? [locationId] : [],
+    });
+  }
   persistAndRender(`Added ${employee.name}`);
+}
+
+function handleCreateRole(event) {
+  event.preventDefault();
+  const name = document.querySelector("#roleName").value.trim();
+  const color = document.querySelector("#roleColor").value;
+  if (!name) {
+    return;
+  }
+  const id = `role-${slugify(name)}`;
+  state.appData.roles.push({ id, name, color });
+  persistAndRender(`Added role ${name}`);
+}
+
+function handleCreateAccessType(event) {
+  event.preventDefault();
+  const name = document.querySelector("#accessTypeName").value.trim();
+  const key = document.querySelector("#accessTypeKey").value;
+  const description = document.querySelector("#accessTypeDescription").value.trim();
+  if (!name) {
+    return;
+  }
+  const existing = state.appData.accessTypes.find((item) => item.id === key);
+  if (existing) {
+    state.appData.accessTypes = state.appData.accessTypes.map((item) =>
+      item.id === key ? { ...item, name, description } : item
+    );
+    persistAndRender(`Updated access type ${name}`);
+    return;
+  }
+  state.appData.accessTypes.push({ id: key, name, description });
+  persistAndRender(`Added access type ${name}`);
+}
+
+function handleCreateUser(event) {
+  event.preventDefault();
+  const name = document.querySelector("#userName").value.trim();
+  const lastName = document.querySelector("#userLastName").value.trim();
+  const email = document.querySelector("#userEmail").value.trim();
+  const pin = document.querySelector("#userPin").value.trim();
+  const role = document.querySelector("#userAccessType").value;
+  const employeeId = document.querySelector("#userEmployeeLink").value;
+  const managedLocationIds = document.querySelector("#userManagedLocations").value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (!name || !lastName || !pin) {
+    return;
+  }
+
+  state.appData.users.push({
+    id: `user-${slugify(name)}-${Date.now()}`,
+    name,
+    lastName,
+    pin,
+    email,
+    role,
+    employeeId,
+    managedLocationIds,
+  });
+  persistAndRender(`Created user ${name}`);
 }
 
 function handleUpdateOwnProfile(event) {

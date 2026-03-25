@@ -1,6 +1,7 @@
 var SHEET_CONFIG = {
   locations: ["id", "name", "city", "timezone", "laborTarget"],
   roles: ["id", "name", "color"],
+  accessTypes: ["id", "name", "description"],
   employees: [
     "id",
     "name",
@@ -102,6 +103,7 @@ function buildStateForUser_(access) {
         return intersects_(row.id ? [row.id] : [], getEmployeeLocations_(state.employees, access.employeeId));
       }),
       roles: state.roles,
+      accessTypes: state.accessTypes,
       employees: state.employees.filter(function (row) {
         return row.id === access.employeeId;
       }),
@@ -127,6 +129,7 @@ function buildStateForUser_(access) {
       return allowedLocations.indexOf(row.id) !== -1;
     }),
     roles: state.roles,
+    accessTypes: state.accessTypes,
     employees: state.employees.filter(function (row) {
       return intersects_(row.locations, allowedLocations);
     }),
@@ -154,6 +157,7 @@ function writeFullState_(payload) {
 
   writeRows_(spreadsheet.getSheetByName("locations"), SHEET_CONFIG.locations, payload.locations || []);
   writeRows_(spreadsheet.getSheetByName("roles"), SHEET_CONFIG.roles, payload.roles || []);
+  writeRows_(spreadsheet.getSheetByName("accessTypes"), SHEET_CONFIG.accessTypes, payload.accessTypes || []);
   writeRows_(spreadsheet.getSheetByName("employees"), SHEET_CONFIG.employees, payload.employees || []);
   writeRows_(spreadsheet.getSheetByName("shifts"), SHEET_CONFIG.shifts, payload.shifts || []);
   writeRows_(spreadsheet.getSheetByName("templates"), SHEET_CONFIG.templates, payload.templates || []);
@@ -178,6 +182,7 @@ function readFullState_() {
     meta: meta,
     locations: readRows_(spreadsheet.getSheetByName("locations"), SHEET_CONFIG.locations),
     roles: readRows_(spreadsheet.getSheetByName("roles"), SHEET_CONFIG.roles),
+    accessTypes: readRows_(spreadsheet.getSheetByName("accessTypes"), SHEET_CONFIG.accessTypes),
     employees: readRows_(spreadsheet.getSheetByName("employees"), SHEET_CONFIG.employees),
     shifts: readRows_(spreadsheet.getSheetByName("shifts"), SHEET_CONFIG.shifts),
     templates: readRows_(spreadsheet.getSheetByName("templates"), SHEET_CONFIG.templates),

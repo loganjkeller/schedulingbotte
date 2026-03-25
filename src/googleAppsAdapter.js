@@ -78,6 +78,7 @@ export function buildAppsScriptPayload(state) {
       meta: state.meta,
       locations: state.locations,
       roles: state.roles,
+      accessTypes: state.accessTypes,
       employees: state.employees,
       shifts: state.shifts,
       templates: state.templates,
