@@ -270,10 +270,10 @@ export function createSeedState() {
   ];
 
   const locationSettings = [
-    { locationId: "loc-nolita", weekStartsOn: "Monday", publishCutoffHours: 48, overtimeWarningHours: 38, approvalRequired: true },
-    { locationId: "loc-soho", weekStartsOn: "Monday", publishCutoffHours: 48, overtimeWarningHours: 38, approvalRequired: true },
-    { locationId: "loc-brooklyn", weekStartsOn: "Monday", publishCutoffHours: 72, overtimeWarningHours: 36, approvalRequired: false },
-    { locationId: "loc-miami", weekStartsOn: "Monday", publishCutoffHours: 48, overtimeWarningHours: 40, approvalRequired: true },
+    { locationId: "loc-nolita", weekStartsOn: "Monday", publishCutoffHours: 48, overtimeWarningHours: 38, approvalRequired: true, lunchOpen: "11:30", lunchClose: "15:00", dinnerOpen: "17:00", dinnerClose: "23:00" },
+    { locationId: "loc-soho", weekStartsOn: "Monday", publishCutoffHours: 48, overtimeWarningHours: 38, approvalRequired: true, lunchOpen: "11:30", lunchClose: "15:00", dinnerOpen: "17:00", dinnerClose: "23:00" },
+    { locationId: "loc-brooklyn", weekStartsOn: "Monday", publishCutoffHours: 72, overtimeWarningHours: 36, approvalRequired: false, lunchOpen: "10:30", lunchClose: "15:30", dinnerOpen: "17:00", dinnerClose: "22:00" },
+    { locationId: "loc-miami", weekStartsOn: "Monday", publishCutoffHours: 48, overtimeWarningHours: 40, approvalRequired: true, lunchOpen: "11:00", lunchClose: "15:00", dinnerOpen: "17:30", dinnerClose: "22:30" },
   ];
 
   const users = [

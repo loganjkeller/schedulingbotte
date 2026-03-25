@@ -14,7 +14,8 @@ const state = {
   session: loadSession(),
   currentUserId: null,
   currentView: "dashboard",
-  lastSyncMessage: "Local demo mode active",
+  weekStartDate: getWeekDates()[0],
+  lastSyncMessage: "",
   filters: {
     locationId: "all",
     roleId: "all",
@@ -120,8 +121,6 @@ function renderAccountSummary() {
 
 function renderAccessGate() {
   hideAppShell();
-  const backend = state.appData.meta.backend || {};
-  const backendLabel = backend.provider === "appsScript" ? "Google Sheets access mode" : "Local demo access mode";
   el.accessGate.innerHTML = `
     <div class="access-card">
       <div class="access-brand">
@@ -132,7 +131,6 @@ function renderAccessGate() {
         </div>
       </div>
       <p class="access-title">Enter with last name and PIN</p>
-      <div class="access-note">${backendLabel}</div>
       <form id="accessForm" class="access-form">
         <div class="form-field">
           <label for="accessLastName">Last name</label>
@@ -146,7 +144,7 @@ function renderAccessGate() {
       </form>
       <div class="access-inline-help">
         <span class="muted">Need help?</span>
-        <button type="button" class="help-button" data-help="Demo access: Keller / 1111, Romano / 2020, Silva / 3030, Torres / 4040, Haddad / 5050. In the real backend, each last name and PIN will map to a role in Google Sheets.">?</button>
+        <button type="button" class="help-button" data-help="Use the last name and PIN assigned to you by admin. Your role and access level are set automatically after login.">?</button>
       </div>
       <p id="accessMessage" class="access-message">${escapeHtml(state.lastSyncMessage || "")}</p>
     </div>
@@ -295,7 +293,7 @@ function renderDashboardView() {
   const visibleShifts = getScopedShifts(user);
   const pendingRequests = getScopedRequests(user).filter((request) => request.status === "pending");
   const todaysShifts = visibleShifts
-    .filter((shift) => shift.date === getWeekDates()[0])
+    .filter((shift) => getWeekDates(state.weekStartDate).includes(shift.date))
     .slice(0, 6);
   const locationCards = getScopedLocations(user)
     .map((location) => {
@@ -335,7 +333,7 @@ function renderDashboardView() {
       <article class="panel">
         <div class="panel-header">
           <div>
-            <h3>Today</h3>
+            <h3>This week</h3>
           </div>
         </div>
         <div class="list-grid compact-list">
@@ -357,12 +355,13 @@ function renderDashboardView() {
 
 function renderScheduleView() {
   const user = getCurrentUser();
-  const weekDates = getWeekDates();
+  const weekDates = getWeekDates(state.weekStartDate);
   const locationOptions = getScopedLocations(user);
   if (state.filters.locationId === "all" && locationOptions[0]) {
     state.filters.locationId = locationOptions[0].id;
   }
   const activeLocationId = state.filters.locationId === "all" ? locationOptions[0]?.id : state.filters.locationId;
+  const activeLocationSetting = state.appData.locationSettings.find((item) => item.locationId === activeLocationId);
   const employeeOptions = getScopedEmployees(user).filter((employee) =>
     activeLocationId ? employee.locations.includes(activeLocationId) : true
   );
@@ -372,9 +371,12 @@ function renderScheduleView() {
       <div class="panel-header">
         <div>
           <h3>Weekly planner</h3>
+          <p class="muted">${formatWeekRange(weekDates[0], weekDates[6])}</p>
         </div>
         <div class="action-row">
           ${renderHelpButton("Pick a location, then drag an employee card into any day column. Their availability and pending requests stay visible while you schedule.")}
+          <button type="button" class="ghost-button" id="prevWeekButton">Previous week</button>
+          <button type="button" class="ghost-button" id="nextWeekButton">Next week</button>
           <button type="button" class="small-button" id="copyWeekButton">Copy last week</button>
           <button type="button" class="small-button" id="quickPublish">Publish visible drafts</button>
         </div>
@@ -393,6 +395,10 @@ function renderScheduleView() {
             ${state.appData.roles.map(renderRoleOption).join("")}
           </select>
         </div>
+      </div>
+      <div class="service-strip">
+        <span class="service-pill">Lunch ${activeLocationSetting?.lunchOpen || "--:--"} - ${activeLocationSetting?.lunchClose || "--:--"}</span>
+        <span class="service-pill">Dinner ${activeLocationSetting?.dinnerOpen || "--:--"} - ${activeLocationSetting?.dinnerClose || "--:--"}</span>
       </div>
       <div class="schedule-layout">
         <aside class="employee-bank">
@@ -425,6 +431,14 @@ function renderScheduleView() {
   });
   document.querySelector("#quickPublish").addEventListener("click", publishVisibleShifts);
   document.querySelector("#copyWeekButton").addEventListener("click", copyLastWeek);
+  document.querySelector("#prevWeekButton").addEventListener("click", () => {
+    state.weekStartDate = addDaysToIso(state.weekStartDate, -7);
+    renderScheduleView();
+  });
+  document.querySelector("#nextWeekButton").addEventListener("click", () => {
+    state.weekStartDate = addDaysToIso(state.weekStartDate, 7);
+    renderScheduleView();
+  });
   document.querySelectorAll("[draggable='true']").forEach((card) => {
     card.addEventListener("dragstart", handleEmployeeDragStart);
   });
@@ -555,7 +569,6 @@ function renderProfileView() {
       <div class="panel-header">
         <div>
           <h3>My profile</h3>
-          <p class="muted">Employees can update their personal information without changing manager-only scheduling fields.</p>
         </div>
         ${renderHelpButton("Profile edits update your employee record. Availability changes should be sent from the Requests page so managers can review them.")}
       </div>
@@ -589,7 +602,6 @@ function renderProfileView() {
       <div class="panel-header">
         <div>
           <h3>My shifts</h3>
-          <p class="muted">Upcoming assignments, restaurant, and position.</p>
         </div>
       </div>
       <div class="list-grid">
@@ -608,13 +620,15 @@ function renderSettingsView() {
     <section class="panel">
       <div class="panel-header">
         <div>
-          <h3>Permissions and locations</h3>
-          <p class="muted">Admin can manage locations, manager coverage, and app access.</p>
+          <h3>Locations</h3>
         </div>
         ${renderHelpButton("Managers can schedule and manage employee records for their locations only. Employees never see this page.")}
       </div>
-      <div class="summary-grid">
+      <div class="settings-grid">
         ${state.appData.locations.map(renderLocationSettingsCard).join("")}
+      </div>
+      <div class="inline-form top-gap">
+        <button type="button" class="primary-button" id="saveLocationSettingsButton">Save restaurant hours</button>
       </div>
       <div class="summary-grid top-gap">
         ${state.appData.users
@@ -654,6 +668,7 @@ function renderSettingsView() {
     </section>
   `;
 
+  document.querySelector("#saveLocationSettingsButton").addEventListener("click", saveLocationServiceSettings);
   document.querySelector("#saveBackendButton").addEventListener("click", saveBackendSettings);
   document.querySelector("#loadRemoteButton").addEventListener("click", loadFromRemote);
   document.querySelector("#syncRemoteButton").addEventListener("click", pushToRemote);
@@ -680,7 +695,10 @@ function renderShiftCard(shift) {
   return `<article class="shift-card">
     <div class="shift-head">
       <strong>${employee?.name || "Unknown employee"}</strong>
-      <button type="button" class="icon-button" data-action="delete-shift" data-id="${shift.id}">×</button>
+      <div class="inline-form">
+        <button type="button" class="ghost-button mini-button" data-action="edit-shift" data-id="${shift.id}">Edit</button>
+        <button type="button" class="icon-button" data-action="delete-shift" data-id="${shift.id}">×</button>
+      </div>
     </div>
     <p class="muted">${getRoleName(shift.roleId)}</p>
     <div class="pill-row">
@@ -764,12 +782,25 @@ function renderRequestCard(request) {
 function renderLocationSettingsCard(location) {
   const config = state.appData.locationSettings.find((item) => item.locationId === location.id);
   return `<article class="summary-card">
-    <p class="eyebrow">${location.city}</p>
     <h3>${location.name}</h3>
-    <p class="muted">Labor target ${(location.laborTarget * 100).toFixed(0)}%</p>
-    <div class="tag-row">
-      <span class="tag">Publish ${config.publishCutoffHours}h before</span>
-      <span class="tag">OT ${config.overtimeWarningHours}h</span>
+    <p class="muted">${location.city}</p>
+    <div class="form-grid top-gap">
+      <div class="form-field">
+        <label for="lunchOpen-${location.id}">Lunch open</label>
+        <input id="lunchOpen-${location.id}" data-setting-location="${location.id}" data-setting-key="lunchOpen" type="time" value="${config.lunchOpen || ""}" />
+      </div>
+      <div class="form-field">
+        <label for="lunchClose-${location.id}">Lunch close</label>
+        <input id="lunchClose-${location.id}" data-setting-location="${location.id}" data-setting-key="lunchClose" type="time" value="${config.lunchClose || ""}" />
+      </div>
+      <div class="form-field">
+        <label for="dinnerOpen-${location.id}">Dinner open</label>
+        <input id="dinnerOpen-${location.id}" data-setting-location="${location.id}" data-setting-key="dinnerOpen" type="time" value="${config.dinnerOpen || ""}" />
+      </div>
+      <div class="form-field">
+        <label for="dinnerClose-${location.id}">Dinner close</label>
+        <input id="dinnerClose-${location.id}" data-setting-location="${location.id}" data-setting-key="dinnerClose" type="time" value="${config.dinnerClose || ""}" />
+      </div>
     </div>
   </article>`;
 }
@@ -889,7 +920,7 @@ function publishVisibleShifts() {
 
 function copyLastWeek() {
   const user = getCurrentUser();
-  const currentWeek = getWeekDates();
+  const currentWeek = getWeekDates(state.weekStartDate);
   const previousWeek = getWeekDates(addDaysToIso(currentWeek[0], -7));
   const sourceShifts = state.appData.shifts.filter((shift) => {
     const inPreviousWeek = previousWeek.includes(shift.date);
@@ -1174,11 +1205,13 @@ function buildAlerts() {
     });
   }
 
-  alerts.push({
-    type: "success",
-    title: "Backend status",
-    body: state.lastSyncMessage,
-  });
+  if (user.role === "admin") {
+    alerts.push({
+      type: "success",
+      title: "Status",
+      body: state.lastSyncMessage || "All changes are up to date.",
+    });
+  }
 
   return alerts;
 }
@@ -1193,11 +1226,33 @@ function bindHelpButtons() {
   document.querySelectorAll("[data-action='delete-shift']").forEach((button) => {
     button.addEventListener("click", () => deleteShift(button.dataset.id));
   });
+  document.querySelectorAll("[data-action='edit-shift']").forEach((button) => {
+    button.addEventListener("click", () => editShift(button.dataset.id));
+  });
 }
 
 function deleteShift(shiftId) {
   state.appData.shifts = state.appData.shifts.filter((shift) => shift.id !== shiftId);
   persistAndRender("Shift removed");
+}
+
+function editShift(shiftId) {
+  const shift = state.appData.shifts.find((item) => item.id === shiftId);
+  if (!shift) {
+    return;
+  }
+  const start = window.prompt("Shift start", shift.start);
+  if (!start) {
+    return;
+  }
+  const end = window.prompt("Shift end", shift.end);
+  if (!end) {
+    return;
+  }
+  state.appData.shifts = state.appData.shifts.map((item) =>
+    item.id === shiftId ? { ...item, start, end } : item
+  );
+  persistAndRender("Shift updated");
 }
 
 function persistAndRender(message) {
@@ -1222,6 +1277,20 @@ async function syncIfLive() {
     state.lastSyncMessage = `Live sync failed: ${error.message}`;
     renderAlerts();
   }
+}
+
+function saveLocationServiceSettings() {
+  const inputs = document.querySelectorAll("[data-setting-location]");
+  state.appData.locationSettings = state.appData.locationSettings.map((setting) => {
+    const updates = {};
+    inputs.forEach((input) => {
+      if (input.dataset.settingLocation === setting.locationId) {
+        updates[input.dataset.settingKey] = input.value;
+      }
+    });
+    return { ...setting, ...updates };
+  });
+  persistAndRender("Restaurant hours saved");
 }
 
 function mergeBackendConfig(remoteData, backend) {
@@ -1422,6 +1491,14 @@ function slugify(value) {
 function getLastName(fullName) {
   const parts = String(fullName || "").trim().split(/\s+/);
   return parts[parts.length - 1] || "";
+}
+
+function formatWeekRange(startDate, endDate) {
+  const start = new Date(`${startDate}T12:00:00`);
+  const end = new Date(`${endDate}T12:00:00`);
+  const startLabel = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(start);
+  const endLabel = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(end);
+  return `${startLabel} - ${endLabel}`;
 }
 
 function escapeHtml(value) {
