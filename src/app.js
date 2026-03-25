@@ -89,6 +89,7 @@ async function init() {
   applyAppConfig();
   state.currentUserId = state.session?.userId ?? null;
   await maybeHydrateFromRemoteWithSession();
+  state.appData = normalizeAppData(state.appData);
   wireEvents();
   render();
 }
@@ -135,17 +136,16 @@ function renderAccessGate() {
   hideAppShell();
   el.accessGate.innerHTML = `
     <div class="access-card">
-      <div class="access-brand">
+      <div class="access-brand centered-brand">
         <div class="access-logo-wrap">
           <img src="${APP_CONFIG.logoPath}" alt="Botte logo" class="access-logo-image" onerror="this.style.display='none'; this.nextElementSibling.style.display='grid';" />
           <div class="access-logo">B</div>
         </div>
         <div>
-          <p class="eyebrow">Botte access</p>
           <h1>${APP_CONFIG.brandName}</h1>
+          <p class="access-subtitle">Sign in with your last name and PIN</p>
         </div>
       </div>
-      <p class="access-title">Enter with last name and PIN</p>
       <form id="accessForm" class="access-form">
         <div class="form-field">
           <label for="accessLastName">Last name</label>
@@ -533,6 +533,7 @@ function renderEmployeeScheduleView(user) {
 function renderPeopleView() {
   const user = getCurrentUser();
   const employees = getScopedEmployees(user);
+  const accessTypes = getAccessTypes();
 
   el.viewRoot.innerHTML = `
     <section class="panel">
@@ -589,7 +590,7 @@ function renderPeopleView() {
         <div class="form-field">
           <label for="employeeAccessType">Access type</label>
           <select id="employeeAccessType">
-            ${state.appData.accessTypes.map((type) => `<option value="${type.id}">${type.name}</option>`).join("")}
+            ${accessTypes.map((type) => `<option value="${type.id}">${type.name}</option>`).join("")}
           </select>
         </div>
         <div class="form-field">
@@ -609,7 +610,11 @@ function renderPeopleView() {
   document.querySelectorAll("[data-action='edit-employee']").forEach((button) => {
     button.addEventListener("click", () => openEmployeeEdit(button.dataset.id));
   });
+  document.querySelector("#createLogin").addEventListener("change", (event) => {
+    toggleEmployeeAccessFields(event.target.value === "yes");
+  });
   document.querySelector("#employeeForm").addEventListener("submit", handleCreateEmployee);
+  toggleEmployeeAccessFields(false);
   bindHelpButtons();
 }
 
@@ -713,6 +718,7 @@ function renderProfileView() {
 }
 
 function renderSettingsView() {
+  const accessTypes = getAccessTypes();
   el.viewRoot.innerHTML = `
     <section class="panel">
       <div class="panel-header">
@@ -764,7 +770,7 @@ function renderSettingsView() {
         </div>
       </div>
       <div class="summary-grid">
-        ${state.appData.accessTypes.map(renderAccessTypeCard).join("")}
+        ${accessTypes.map(renderAccessTypeCard).join("")}
       </div>
       <form id="accessTypeForm" class="form-grid top-gap">
         <div class="form-field">
@@ -807,7 +813,7 @@ function renderSettingsView() {
         <div class="form-field">
           <label for="userAccessType">Access type</label>
           <select id="userAccessType">
-            ${state.appData.accessTypes.map((type) => `<option value="${type.id}">${type.name}</option>`).join("")}
+            ${accessTypes.map((type) => `<option value="${type.id}">${type.name}</option>`).join("")}
           </select>
         </div>
         <div class="form-field">
@@ -1150,14 +1156,24 @@ function copyLastWeek() {
 
 function handleCreateEmployee(event) {
   event.preventDefault();
+  const name = document.querySelector("#employeeName").value.trim();
+  const email = document.querySelector("#employeeEmail").value.trim();
   const locationId = document.querySelector("#employeeLocation").value;
   const createLogin = document.querySelector("#createLogin").value === "yes";
   const accessType = document.querySelector("#employeeAccessType").value;
   const pin = document.querySelector("#employeePin").value.trim() || "0000";
+  if (!name || !locationId) {
+    window.alert("Add at least the employee name and location.");
+    return;
+  }
+  if (createLogin && (!email || !pin)) {
+    window.alert("To create user access, add email and PIN.");
+    return;
+  }
   const employee = {
-    id: `emp-${slugify(document.querySelector("#employeeName").value)}-${Date.now()}`,
-    name: document.querySelector("#employeeName").value.trim(),
-    email: document.querySelector("#employeeEmail").value.trim(),
+    id: `emp-${slugify(name)}-${Date.now()}`,
+    name,
+    email,
     phone: "",
     roleId: document.querySelector("#employeeRole").value,
     positionLabel: getRoleName(document.querySelector("#employeeRole").value),
@@ -1232,6 +1248,7 @@ function handleCreateUser(event) {
     .filter(Boolean);
 
   if (!name || !lastName || !pin) {
+    window.alert("Add user name, last name, and PIN.");
     return;
   }
 
@@ -1246,6 +1263,15 @@ function handleCreateUser(event) {
     managedLocationIds,
   });
   persistAndRender(`Created user ${name}`);
+}
+
+function toggleEmployeeAccessFields(enabled) {
+  ["employeeAccessType", "employeePin"].forEach((id) => {
+    const field = document.querySelector(`#${id}`);
+    if (field) {
+      field.disabled = !enabled;
+    }
+  });
 }
 
 function handleUpdateOwnProfile(event) {
@@ -1512,7 +1538,7 @@ function saveLocationServiceSettings() {
 }
 
 function mergeBackendConfig(remoteData, backend) {
-  const next = cloneState(remoteData);
+  const next = normalizeAppData(cloneState(remoteData));
   next.meta = next.meta || {};
   next.meta.backend = {
     provider: backend.provider,
@@ -1542,6 +1568,25 @@ async function authenticateUser(lastName, pin) {
   }
 
   return user;
+}
+
+function normalizeAppData(appData) {
+  const next = cloneState(appData);
+  next.roles = next.roles || [];
+  next.users = next.users || [];
+  next.employees = next.employees || [];
+  next.requests = next.requests || [];
+  next.locationSettings = next.locationSettings || [];
+  next.accessTypes = next.accessTypes || [
+    { id: "admin", name: "Admin", description: "Full access to everything." },
+    { id: "manager", name: "Manager", description: "Manages staff and scheduling for assigned locations." },
+    { id: "employee", name: "Employee", description: "Views schedule, profile, and requests." },
+  ];
+  return next;
+}
+
+function getAccessTypes() {
+  return normalizeAppData(state.appData).accessTypes;
 }
 
 function loadSession() {

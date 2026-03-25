@@ -68,6 +68,12 @@ textarea {
   margin-bottom: 18px;
 }
 
+.centered-brand {
+  flex-direction: column;
+  text-align: center;
+  gap: 14px;
+}
+
 .access-logo-wrap {
   width: 96px;
   height: 96px;
@@ -101,16 +107,17 @@ textarea {
   margin-bottom: 0;
 }
 
-.access-title {
-  margin: 0 0 14px;
-  font-size: 1.02rem;
-  color: var(--muted);
+.access-subtitle {
+  margin: 8px 0 0;
+  font-size: 0.98rem;
+  color: rgba(36, 29, 24, 0.56);
+  font-weight: 500;
 }
 
 .access-form {
   display: grid;
   gap: 14px;
-  margin: 22px 0 12px;
+  margin: 26px 0 12px;
 }
 
 .access-note {
