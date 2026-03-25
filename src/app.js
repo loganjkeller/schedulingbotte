@@ -56,6 +56,7 @@ const pages = {
 
 const el = {
   accessGate: document.querySelector("#accessGate"),
+  modalRoot: document.querySelector("#modalRoot"),
   appShell: document.querySelector(".app-shell"),
   accountName: document.querySelector("#accountName"),
   navTabs: document.querySelector("#navTabs"),
@@ -1331,26 +1332,65 @@ function deleteEmployee(employeeId) {
 
 function openEmployeeEdit(employeeId) {
   const employee = getEmployee(employeeId);
-  const nextName = window.prompt("Employee name", employee.name);
-  if (!nextName) {
+  if (!employee) {
     return;
   }
-  const nextEmail = window.prompt("Employee email", employee.email || "");
-  const nextPhone = window.prompt("Phone", employee.phone || "");
-  const nextPosition = window.prompt("Position label", employee.positionLabel || getRoleName(employee.roleId));
-  replaceEmployee({
-    ...employee,
-    name: nextName.trim(),
-    email: (nextEmail || "").trim(),
-    phone: (nextPhone || "").trim(),
-    positionLabel: (nextPosition || "").trim(),
+  el.modalRoot.innerHTML = `
+    <div class="modal-overlay" data-close-modal="true">
+      <div class="modal-card" role="dialog" aria-modal="true" aria-label="Edit employee">
+        <div class="panel-header">
+          <div>
+            <h3>Edit employee</h3>
+          </div>
+          <button type="button" class="icon-button" id="closeModalButton">×</button>
+        </div>
+        <form id="employeeEditForm" class="form-grid">
+          <div class="form-field">
+            <label for="editEmployeeName">Name</label>
+            <input id="editEmployeeName" value="${escapeHtml(employee.name)}" />
+          </div>
+          <div class="form-field">
+            <label for="editEmployeeEmail">Email</label>
+            <input id="editEmployeeEmail" value="${escapeHtml(employee.email || "")}" />
+          </div>
+          <div class="form-field">
+            <label for="editEmployeePhone">Phone</label>
+            <input id="editEmployeePhone" value="${escapeHtml(employee.phone || "")}" />
+          </div>
+          <div class="form-field">
+            <label for="editEmployeePosition">Position label</label>
+            <input id="editEmployeePosition" value="${escapeHtml(employee.positionLabel || getRoleName(employee.roleId))}" />
+          </div>
+          <div class="inline-form full-span">
+            <button type="button" class="ghost-button" id="cancelEmployeeEdit">Cancel</button>
+            <button type="submit" class="primary-button">Save changes</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+  bindModalClose();
+  document.querySelector("#employeeEditForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const nextName = document.querySelector("#editEmployeeName").value.trim();
+    const nextEmail = document.querySelector("#editEmployeeEmail").value.trim();
+    const nextPhone = document.querySelector("#editEmployeePhone").value.trim();
+    const nextPosition = document.querySelector("#editEmployeePosition").value.trim();
+    replaceEmployee({
+      ...employee,
+      name: nextName,
+      email: nextEmail,
+      phone: nextPhone,
+      positionLabel: nextPosition,
+    });
+    state.appData.users = state.appData.users.map((item) =>
+      item.employeeId === employeeId
+        ? { ...item, name: nextName, lastName: getLastName(nextName), email: nextEmail }
+        : item
+    );
+    closeModal();
+    persistAndRender("Employee updated");
   });
-  state.appData.users = state.appData.users.map((item) =>
-    item.employeeId === employeeId
-      ? { ...item, name: nextName.trim(), lastName: getLastName(nextName.trim()), email: (nextEmail || "").trim() }
-      : item
-  );
-  persistAndRender("Employee updated");
 }
 
 async function handleAccessLogin(event) {
@@ -1485,18 +1525,60 @@ function editShift(shiftId) {
   if (!shift) {
     return;
   }
-  const start = window.prompt("Shift start", shift.start);
-  if (!start) {
-    return;
-  }
-  const end = window.prompt("Shift end", shift.end);
-  if (!end) {
-    return;
-  }
-  state.appData.shifts = state.appData.shifts.map((item) =>
-    item.id === shiftId ? { ...item, start, end } : item
-  );
-  persistAndRender("Shift updated");
+  el.modalRoot.innerHTML = `
+    <div class="modal-overlay" data-close-modal="true">
+      <div class="modal-card modal-card-small" role="dialog" aria-modal="true" aria-label="Edit shift">
+        <div class="panel-header">
+          <div>
+            <h3>Edit shift</h3>
+          </div>
+          <button type="button" class="icon-button" id="closeModalButton">×</button>
+        </div>
+        <form id="shiftEditForm" class="form-grid">
+          <div class="form-field">
+            <label for="editShiftStart">Start</label>
+            <input id="editShiftStart" type="time" value="${shift.start}" />
+          </div>
+          <div class="form-field">
+            <label for="editShiftEnd">End</label>
+            <input id="editShiftEnd" type="time" value="${shift.end}" />
+          </div>
+          <div class="inline-form full-span">
+            <button type="button" class="ghost-button" id="cancelShiftEdit">Cancel</button>
+            <button type="submit" class="primary-button">Save shift</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+  bindModalClose();
+  document.querySelector("#shiftEditForm").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const start = document.querySelector("#editShiftStart").value;
+    const end = document.querySelector("#editShiftEnd").value;
+    state.appData.shifts = state.appData.shifts.map((item) =>
+      item.id === shiftId ? { ...item, start, end } : item
+    );
+    closeModal();
+    persistAndRender("Shift updated");
+  });
+}
+
+function bindModalClose() {
+  el.modalRoot.querySelectorAll("[data-close-modal='true']").forEach((node) => {
+    node.addEventListener("click", (event) => {
+      if (event.target === node) {
+        closeModal();
+      }
+    });
+  });
+  el.modalRoot.querySelectorAll("#closeModalButton, #cancelEmployeeEdit, #cancelShiftEdit").forEach((button) => {
+    button.addEventListener("click", closeModal);
+  });
+}
+
+function closeModal() {
+  el.modalRoot.innerHTML = "";
 }
 
 function persistAndRender(message) {
