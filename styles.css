@@ -470,16 +470,24 @@ textarea {
 .location-choice {
   display: flex;
   align-items: center;
+  justify-content: flex-start;
   gap: 10px;
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.7);
   color: var(--text);
+  min-height: 48px;
 }
 
 .location-choice input {
   margin: 0;
+  flex: 0 0 auto;
+}
+
+.location-choice span {
+  flex: 0 1 auto;
+  line-height: 1.2;
 }
 
 .stats-grid {

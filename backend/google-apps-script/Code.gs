@@ -64,8 +64,9 @@ function doPost(e) {
       var syncAccess = getUserAccess_(request.userEmail);
       if (syncAccess.role !== "admin") {
         if (request.context && isAllowedNonAdminAction_(request.context.type)) {
-          writeFullState_(request.payload || {});
-          notifyByContext_(request.payload || {}, request.context || {});
+          var mergedState = mergeStateForAccess_(readFullState_(), request.payload || {}, syncAccess, request.context || {});
+          writeFullState_(mergedState);
+          notifyByContext_(mergedState, request.context || {});
           return jsonResponse_({ ok: true, message: "Google Sheets updated." });
         }
         return jsonResponse_({ ok: false, error: "Only admins can sync all scheduling data." });
@@ -197,6 +198,45 @@ function readFullState_() {
     users: readRows_(spreadsheet.getSheetByName("users"), SHEET_CONFIG.users),
     requests: readRows_(spreadsheet.getSheetByName("requests"), SHEET_CONFIG.requests),
   };
+}
+
+function mergeStateForAccess_(currentState, incomingPayload, access, context) {
+  var incoming = incomingPayload || {};
+  var merged = {
+    meta: incoming.meta || currentState.meta,
+    locations: currentState.locations,
+    roles: incoming.roles && incoming.roles.length ? incoming.roles : currentState.roles,
+    accessTypes: incoming.accessTypes && incoming.accessTypes.length ? incoming.accessTypes : currentState.accessTypes,
+    employees: currentState.employees.slice(),
+    shifts: currentState.shifts.slice(),
+    templates: currentState.templates,
+    locationSettings: currentState.locationSettings,
+    users: currentState.users.slice(),
+    requests: currentState.requests.slice(),
+  };
+
+  if (access.role === "manager") {
+    var allowedLocations = access.managedLocationIds || [];
+    var scopedEmployeeIds = scopedEmployeeIds_(mergeEmployeesForLocations_(currentState.employees, incoming.employees || [], allowedLocations), allowedLocations);
+    merged.employees = mergeEmployeesForLocations_(currentState.employees, incoming.employees || [], allowedLocations);
+    merged.shifts = mergeShiftsForLocations_(currentState.shifts, incoming.shifts || [], allowedLocations);
+    merged.requests = mergeRequestsForEmployees_(
+      currentState.requests,
+      incoming.requests || [],
+      scopedEmployeeIds
+    );
+    merged.users = mergeUsersForAccess_(currentState.users, incoming.users || [], access, scopedEmployeeIds);
+    return merged;
+  }
+
+  if (access.role === "employee") {
+    merged.employees = mergeEmployeeSelf_(currentState.employees, incoming.employees || [], access.employeeId);
+    merged.requests = mergeRequestsForEmployees_(currentState.requests, incoming.requests || [], [access.employeeId]);
+    merged.users = mergeUsersForAccess_(currentState.users, incoming.users || [], access, [access.employeeId]);
+    return merged;
+  }
+
+  return incomingPayload;
 }
 
 function isAllowedNonAdminAction_(type) {
@@ -361,6 +401,88 @@ function scopedEmployeeIds_(employees, allowedLocations) {
     .map(function (row) {
       return row.id;
     });
+}
+
+function mergeEmployeesForLocations_(currentEmployees, incomingEmployees, allowedLocations) {
+  var incomingById = {};
+  (incomingEmployees || []).forEach(function (employee) {
+    if (intersects_(employee.locations || [], allowedLocations || [])) {
+      incomingById[employee.id] = employee;
+    }
+  });
+
+  var next = currentEmployees.map(function (employee) {
+    return incomingById[employee.id] ? incomingById[employee.id] : employee;
+  });
+
+  Object.keys(incomingById).forEach(function (id) {
+    var exists = next.some(function (employee) {
+      return employee.id === id;
+    });
+    if (!exists) {
+      next.push(incomingById[id]);
+    }
+  });
+
+  return next;
+}
+
+function mergeShiftsForLocations_(currentShifts, incomingShifts, allowedLocations) {
+  var kept = currentShifts.filter(function (shift) {
+    return (allowedLocations || []).indexOf(shift.locationId) === -1;
+  });
+  return kept.concat((incomingShifts || []).filter(function (shift) {
+    return (allowedLocations || []).indexOf(shift.locationId) !== -1;
+  }));
+}
+
+function mergeRequestsForEmployees_(currentRequests, incomingRequests, employeeIds) {
+  var scopedIds = employeeIds || [];
+  var kept = currentRequests.filter(function (request) {
+    return scopedIds.indexOf(request.employeeId) === -1;
+  });
+  return kept.concat((incomingRequests || []).filter(function (request) {
+    return scopedIds.indexOf(request.employeeId) !== -1;
+  }));
+}
+
+function mergeUsersForAccess_(currentUsers, incomingUsers, access, employeeIds) {
+  var scopedEmployeeIds = employeeIds || [];
+  var incomingById = {};
+  (incomingUsers || []).forEach(function (user) {
+    var isSelf = user.email === access.email;
+    var belongsToManagedEmployee = user.employeeId && scopedEmployeeIds.indexOf(user.employeeId) !== -1;
+    if (isSelf || belongsToManagedEmployee) {
+      incomingById[user.id] = user;
+    }
+  });
+
+  var next = currentUsers.map(function (user) {
+    return incomingById[user.id] ? incomingById[user.id] : user;
+  });
+
+  Object.keys(incomingById).forEach(function (id) {
+    var exists = next.some(function (user) {
+      return user.id === id;
+    });
+    if (!exists) {
+      next.push(incomingById[id]);
+    }
+  });
+
+  return next;
+}
+
+function mergeEmployeeSelf_(currentEmployees, incomingEmployees, employeeId) {
+  var incoming = (incomingEmployees || []).filter(function (employee) {
+    return employee.id === employeeId;
+  })[0];
+  if (!incoming) {
+    return currentEmployees;
+  }
+  return currentEmployees.map(function (employee) {
+    return employee.id === employeeId ? incoming : employee;
+  });
 }
 
 function getEmployeeLocations_(employees, employeeId) {
