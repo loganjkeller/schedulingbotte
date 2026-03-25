@@ -361,6 +361,10 @@ function serializeCell_(value) {
     return value.join(",");
   }
 
+  if (value instanceof Date) {
+    return formatCellDate_(value);
+  }
+
   if (typeof value === "boolean") {
     return value ? "TRUE" : "FALSE";
   }
@@ -372,6 +376,8 @@ function deserializeCell_(header, value) {
   var listHeaders = ["locations", "tags", "availability", "locationIds", "roles", "managedLocationIds"];
   var numericHeaders = ["laborTarget", "hourlyRate", "weeklyHoursTarget", "publishCutoffHours", "overtimeWarningHours"];
   var booleanHeaders = ["approvalRequired"];
+  var dateHeaders = ["date", "startDate", "endDate"];
+  var timestampHeaders = ["createdAt", "seededAt", "syncedAt"];
 
   if (listHeaders.indexOf(header) !== -1) {
     return String(value || "")
@@ -390,7 +396,35 @@ function deserializeCell_(header, value) {
     return String(value).toUpperCase() === "TRUE";
   }
 
+  if (dateHeaders.indexOf(header) !== -1) {
+    return formatCellDate_(value);
+  }
+
+  if (timestampHeaders.indexOf(header) !== -1) {
+    return formatCellTimestamp_(value);
+  }
+
   return value;
+}
+
+function formatCellDate_(value) {
+  if (!value) {
+    return "";
+  }
+  if (Object.prototype.toString.call(value) === "[object Date]" && !isNaN(value.getTime())) {
+    return Utilities.formatDate(value, Session.getScriptTimeZone(), "yyyy-MM-dd");
+  }
+  return String(value).slice(0, 10);
+}
+
+function formatCellTimestamp_(value) {
+  if (!value) {
+    return "";
+  }
+  if (Object.prototype.toString.call(value) === "[object Date]" && !isNaN(value.getTime())) {
+    return value.toISOString();
+  }
+  return String(value);
 }
 
 function scopedEmployeeIds_(employees, allowedLocations) {
