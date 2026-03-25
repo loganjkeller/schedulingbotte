@@ -472,6 +472,7 @@ textarea {
   align-items: center;
   justify-content: flex-start;
   gap: 10px;
+  margin-bottom: 0;
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -481,8 +482,12 @@ textarea {
 }
 
 .location-choice input {
+  width: auto;
   margin: 0;
   flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
 }
 
 .location-choice span {
