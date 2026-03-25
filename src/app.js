@@ -1211,6 +1211,22 @@ function handleScheduleDrop(event) {
     return;
   }
 
+  const duplicateShift = state.appData.shifts.find(
+    (shift) =>
+      normalizeIsoDate(shift.date) === date &&
+      shift.locationId === locationId &&
+      shift.employeeId === employeeId &&
+      shift.start === "16:00" &&
+      shift.end === "22:00" &&
+      shift.status === "draft"
+  );
+
+  if (duplicateShift) {
+    state.lastSyncMessage = `${employee.name} already has a draft shift on ${formatDate(date).weekday}`;
+    renderAlerts();
+    return;
+  }
+
   state.appData.shifts.push({
     id: `shift-${crypto.randomUUID()}`,
     date,
@@ -2175,6 +2191,16 @@ function normalizeAppData(appData) {
   next.employees = next.employees || [];
   next.requests = next.requests || [];
   next.locationSettings = next.locationSettings || [];
+  next.shifts = (next.shifts || []).map((shift) => ({
+    ...shift,
+    date: normalizeIsoDate(shift.date),
+  }));
+  next.requests = next.requests.map((request) => ({
+    ...request,
+    startDate: normalizeIsoDate(request.startDate),
+    endDate: normalizeIsoDate(request.endDate),
+    createdAt: normalizeTimestamp(request.createdAt),
+  }));
   next.accessTypes = next.accessTypes || [
     { id: "admin", name: "Admin", description: "Full access to everything." },
     { id: "manager", name: "Manager", description: "Manages staff and scheduling for assigned locations." },
@@ -2325,7 +2351,7 @@ function calculateHours(start, end) {
 }
 
 function formatDate(dateString) {
-  const date = new Date(`${dateString}T12:00:00`);
+  const date = new Date(`${normalizeIsoDate(dateString)}T12:00:00`);
   return {
     weekday: new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(date),
     fullDate: new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(date),
@@ -2333,7 +2359,7 @@ function formatDate(dateString) {
 }
 
 function addDaysToIso(dateString, amount) {
-  const date = new Date(`${dateString}T12:00:00`);
+  const date = new Date(`${normalizeIsoDate(dateString)}T12:00:00`);
   date.setDate(date.getDate() + amount);
   return date.toISOString().slice(0, 10);
 }
@@ -2355,11 +2381,25 @@ function getLastName(fullName) {
 }
 
 function formatWeekRange(startDate, endDate) {
-  const start = new Date(`${startDate}T12:00:00`);
-  const end = new Date(`${endDate}T12:00:00`);
+  const start = new Date(`${normalizeIsoDate(startDate)}T12:00:00`);
+  const end = new Date(`${normalizeIsoDate(endDate)}T12:00:00`);
   const startLabel = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(start);
   const endLabel = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(end);
   return `${startLabel} - ${endLabel}`;
+}
+
+function normalizeIsoDate(value) {
+  if (!value) {
+    return "";
+  }
+  return String(value).slice(0, 10);
+}
+
+function normalizeTimestamp(value) {
+  if (!value) {
+    return "";
+  }
+  return String(value);
 }
 
 function isShiftInService(shift, locationSetting, serviceKey) {
