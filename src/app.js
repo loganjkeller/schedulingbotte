@@ -615,11 +615,11 @@ function renderPeopleView() {
         </div>
         <div class="form-field">
           <label for="employeeRate">Hourly rate</label>
-          <input id="employeeRate" type="number" min="0" step="1" value="18" />
+          <input id="employeeRate" type="number" min="0" step="0.01" value="18.00" />
         </div>
         <div class="form-field">
           <label for="employeeTargetHours">Weekly target</label>
-          <input id="employeeTargetHours" type="number" min="0" step="1" value="32" />
+          <input id="employeeTargetHours" type="number" min="0" step="0.5" value="32.0" />
         </div>
         <div class="form-field">
           <label for="createLogin">Create user access</label>
@@ -670,17 +670,6 @@ function renderRequestsView() {
   const user = getCurrentUser();
   const visibleRequests = getScopedRequests(user);
   const approvalGroups = getScheduleApprovalGroups(user);
-  const requestOptions = user.role === "employee"
-    ? `
-      <option value="time_off">Time off</option>
-      <option value="availability_change">Availability change</option>
-      <option value="message">Message to manager/admin</option>
-    `
-    : `
-      <option value="time_off">Time off</option>
-      <option value="availability_change">Availability change</option>
-      <option value="message">Message</option>
-    `;
 
   el.viewRoot.innerHTML = `
     ${user.role !== "employee" ? `
@@ -701,9 +690,9 @@ function renderRequestsView() {
       <div class="panel-header">
         <div>
           <h3>${user.role === "employee" ? "Send a request" : "Request inbox"}</h3>
-          <p class="muted">${user.role === "employee" ? "Ask for time off, update your availability, or send a note to your managers." : "Review incoming employee requests and approve or decline them."}</p>
+          <p class="muted">${user.role === "employee" ? "Use requests for time off or shift swaps. Permanent availability is managed in your profile." : "Review incoming employee requests and approve or decline them."}</p>
         </div>
-        ${renderHelpButton("Availability change can be temporary for a date range or permanent. Messages are a lightweight way for employees to contact managers or admin.")}
+        ${renderHelpButton("Employees use this page for time off and shift swaps. Permanent lunch and dinner availability is managed from the profile page.")}
       </div>
       ${user.role === "employee" ? renderEmployeeRequestForm() : ""}
       <div class="list-grid">
@@ -738,6 +727,7 @@ function renderProfileView() {
   const user = getCurrentUser();
   const employee = getEmployeeByUser(user);
   const shifts = getEmployeeShifts(employee.id);
+  const selectedAvailability = new Set(parseAvailabilitySelection(employee.availability || []));
 
   el.viewRoot.innerHTML = `
     <section class="panel">
@@ -765,8 +755,8 @@ function renderProfileView() {
           <input id="profileNotes" value="${employee.notes || ""}" />
         </div>
         <div class="form-field full-span">
-          <label for="profileAvailability">Availability</label>
-          <textarea id="profileAvailability" placeholder="Example: Monday lunch, Tuesday off, Friday closing only">${(employee.availability || []).join("\n")}</textarea>
+          <label>Permanent availability</label>
+          ${renderAvailabilityGrid(selectedAvailability)}
         </div>
         <div class="inline-form full-span">
           <button type="submit" class="primary-button">Save profile</button>
@@ -786,6 +776,7 @@ function renderProfileView() {
   `;
 
   document.querySelector("#profileForm").addEventListener("submit", handleUpdateOwnProfile);
+  bindAvailabilityBulkActions();
   bindHelpButtons();
 }
 
@@ -957,8 +948,8 @@ function renderEmployeeManagerCard(employee) {
     <h4>${employee.name}</h4>
     <p class="muted">${employee.locations.map(getLocationName).join(", ")}</p>
     <div class="tag-row">
-      <span class="tag">$${employee.hourlyRate}/hr</span>
-      <span class="tag">${employee.weeklyHoursTarget}h target</span>
+      <span class="tag">${formatCurrency(employee.hourlyRate)}/hr</span>
+      <span class="tag">${formatHoursValue(employee.weeklyHoursTarget)}h target</span>
       <span class="tag">${employee.phone || "No phone"}</span>
     </div>
     <p class="kpi-note">${employee.email || "No email"} · ${employee.positionLabel || getRoleName(employee.roleId)}</p>
@@ -982,7 +973,7 @@ function renderStaffPlannerCard(employee, activeLocationId) {
     .filter((shift) => shift.employeeId === employee.id && shift.locationId === activeLocationId)
     .reduce((sum, shift) => sum + calculateHours(shift.start, shift.end), 0);
   const pendingAvailability = state.appData.requests.find(
-    (request) => request.employeeId === employee.id && request.type === "availability_change" && request.status === "pending"
+    (request) => request.employeeId === employee.id && request.type === "swap_shift" && request.status === "pending"
   );
   return `<article class="staff-card" draggable="true" data-employee-id="${employee.id}">
     <div class="shift-head">
@@ -990,8 +981,8 @@ function renderStaffPlannerCard(employee, activeLocationId) {
       <span class="pill">${assignedHours.toFixed(1)}h</span>
     </div>
     <p class="muted">${employee.positionLabel || getRoleName(employee.roleId)}</p>
-    <p class="kpi-note">Availability: ${(employee.availability || []).join(" · ") || "Not set"}</p>
-    ${pendingAvailability ? `<p class="staff-note">Pending change: ${pendingAvailability.note}</p>` : ""}
+    <p class="kpi-note">Availability: ${formatAvailabilitySummary(employee.availability || [])}</p>
+    ${pendingAvailability ? `<p class="staff-note">Pending swap request: ${pendingAvailability.note}</p>` : ""}
   </article>`;
 }
 
@@ -1139,8 +1130,7 @@ function renderEmployeeRequestForm() {
       <label for="requestType">Request type</label>
       <select id="requestType">
         <option value="time_off">Time off</option>
-        <option value="availability_change">Availability change</option>
-        <option value="message">Message</option>
+        <option value="swap_shift">Shift swap / turn exchange</option>
       </select>
     </div>
     <div class="form-field">
@@ -1151,21 +1141,37 @@ function renderEmployeeRequestForm() {
       <label for="requestEndDate">End date</label>
       <input id="requestEndDate" type="date" />
     </div>
-    <div class="form-field">
-      <label for="requestScope">Availability scope</label>
-      <select id="requestScope">
-        <option value="temporary">Temporary range</option>
-        <option value="permanent">Permanent change</option>
-      </select>
-    </div>
     <div class="form-field full-span">
       <label for="requestNote">Details</label>
-      <textarea id="requestNote" placeholder="Explain the time-off request, new availability, or your message"></textarea>
+      <textarea id="requestNote" placeholder="Explain the time-off request or who you want to swap with"></textarea>
     </div>
     <div class="inline-form full-span">
       <button type="submit" class="primary-button">Send request</button>
     </div>
   </form>`;
+}
+
+function renderAvailabilityGrid(selectedAvailability) {
+  return `<div class="availability-toolbar">
+      <button type="button" class="ghost-button mini-button" data-availability-action="all">All available</button>
+      <button type="button" class="ghost-button mini-button" data-availability-action="clear">Clear all</button>
+    </div>
+    <div class="availability-grid">
+      ${AVAILABILITY_DAYS.map((day) => `
+        <div class="availability-row">
+          <span class="availability-day">${day.label}</span>
+          ${AVAILABILITY_SERVICES.map((service) => {
+            const key = `${day.id}_${service.id}`;
+            return `
+              <label class="availability-chip ${selectedAvailability.has(key) ? "is-selected" : ""}">
+                <input type="checkbox" name="profileAvailability" value="${key}" ${selectedAvailability.has(key) ? "checked" : ""} />
+                <span>${service.label}</span>
+              </label>
+            `;
+          }).join("")}
+        </div>
+      `).join("")}
+    </div>`;
 }
 
 function renderLocationCheckboxGroup(name, locations, selectedIds = []) {
@@ -1352,10 +1358,10 @@ function handleCreateEmployee(event) {
     roleId: document.querySelector("#employeeRole").value,
     positionLabel: getRoleName(document.querySelector("#employeeRole").value),
     locations: locationIds,
-    hourlyRate: Number(document.querySelector("#employeeRate").value),
-    weeklyHoursTarget: Number(document.querySelector("#employeeTargetHours").value),
+    hourlyRate: Number.parseFloat(document.querySelector("#employeeRate").value || "0"),
+    weeklyHoursTarget: Number.parseFloat(document.querySelector("#employeeTargetHours").value || "0"),
     tags: [],
-    availability: ["Open availability"],
+    availability: buildAvailabilitySelection(AVAILABILITY_KEYS),
     notes: "",
     externalEmployeeId: "",
   };
@@ -1481,10 +1487,7 @@ function handleUpdateOwnProfile(event) {
     phone: document.querySelector("#profilePhone").value.trim(),
     email: document.querySelector("#profileEmail").value.trim(),
     notes: document.querySelector("#profileNotes").value.trim(),
-    availability: document.querySelector("#profileAvailability").value
-      .split("\n")
-      .map((item) => item.trim())
-      .filter(Boolean),
+    availability: buildAvailabilitySelection(getCheckedValues("profileAvailability")),
   };
   replaceEmployee(next);
   state.appData.users = state.appData.users.map((item) =>
@@ -1506,7 +1509,7 @@ function handleCreateRequest(event) {
     status: "pending",
     startDate: document.querySelector("#requestStartDate").value,
     endDate: document.querySelector("#requestEndDate").value,
-    scope: document.querySelector("#requestScope").value,
+    scope: document.querySelector("#requestType").value === "swap_shift" ? "single_shift" : "date_range",
     note: document.querySelector("#requestNote").value.trim(),
     createdAt: new Date().toISOString(),
   });
@@ -1986,6 +1989,23 @@ function getCheckedValues(name) {
   return Array.from(document.querySelectorAll(`input[name='${name}']:checked`)).map((input) => input.value);
 }
 
+function bindAvailabilityBulkActions() {
+  document.querySelectorAll("[data-availability-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const checked = button.dataset.availabilityAction === "all";
+      document.querySelectorAll("input[name='profileAvailability']").forEach((input) => {
+        input.checked = checked;
+        input.closest(".availability-chip")?.classList.toggle("is-selected", checked);
+      });
+    });
+  });
+  document.querySelectorAll("input[name='profileAvailability']").forEach((input) => {
+    input.addEventListener("change", () => {
+      input.closest(".availability-chip")?.classList.toggle("is-selected", input.checked);
+    });
+  });
+}
+
 function getScheduleApprovalGroups(user) {
   const visibleStatuses = user.role === "admin" ? ["pending_approval"] : ["pending_approval"];
   const scopedLocations = new Set(getScopedLocations(user).map((location) => location.id));
@@ -2415,7 +2435,90 @@ function getLocationSetting(locationId) {
   };
 }
 
+const AVAILABILITY_DAYS = [
+  { id: "mon", label: "Mon" },
+  { id: "tue", label: "Tue" },
+  { id: "wed", label: "Wed" },
+  { id: "thu", label: "Thu" },
+  { id: "fri", label: "Fri" },
+  { id: "sat", label: "Sat" },
+  { id: "sun", label: "Sun" },
+];
+
+const AVAILABILITY_SERVICES = [
+  { id: "lunch", label: "Lunch" },
+  { id: "dinner", label: "Dinner" },
+];
+
+const AVAILABILITY_KEYS = AVAILABILITY_DAYS.flatMap((day) =>
+  AVAILABILITY_SERVICES.map((service) => `${day.id}_${service.id}`)
+);
+
+function parseAvailabilitySelection(availability) {
+  const values = Array.isArray(availability) ? availability : [];
+  const direct = values.filter((value) => AVAILABILITY_KEYS.includes(value));
+  if (direct.length) {
+    return direct;
+  }
+  if (values.includes("Open availability")) {
+    return [...AVAILABILITY_KEYS];
+  }
+  return [];
+}
+
+function buildAvailabilitySelection(keys) {
+  const normalized = (keys || []).filter((value) => AVAILABILITY_KEYS.includes(value));
+  if (!normalized.length) {
+    return [];
+  }
+  if (normalized.length === AVAILABILITY_KEYS.length) {
+    return ["Open availability", ...normalized];
+  }
+  return normalized;
+}
+
+function formatAvailabilitySummary(availability) {
+  const selected = parseAvailabilitySelection(availability);
+  if (!selected.length) {
+    return "Not set";
+  }
+  if (selected.length === AVAILABILITY_KEYS.length) {
+    return "Open lunch and dinner all week";
+  }
+  const dayMap = new Map();
+  selected.forEach((key) => {
+    const [day, service] = key.split("_");
+    const current = dayMap.get(day) || [];
+    current.push(service);
+    dayMap.set(day, current);
+  });
+  return AVAILABILITY_DAYS
+    .filter((day) => dayMap.has(day.id))
+    .map((day) => `${day.label} ${dayMap.get(day.id).map(capitalize).join("/")}`)
+    .join(" · ");
+}
+
+function formatCurrency(value) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(Number(value || 0));
+}
+
+function formatHoursValue(value) {
+  const numeric = Number(value || 0);
+  return numeric.toFixed(numeric % 1 === 0 ? 0 : 1);
+}
+
 function humanizeRequestType(type) {
+  if (type === "swap_shift") {
+    return "Shift Swap";
+  }
+  if (type === "time_off") {
+    return "Time Off";
+  }
   return type
     .split("_")
     .map(capitalize)

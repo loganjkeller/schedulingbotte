@@ -202,6 +202,7 @@ function readFullState_() {
 
 function mergeStateForAccess_(currentState, incomingPayload, access, context) {
   var incoming = incomingPayload || {};
+  var actionType = context && context.type ? context.type : "";
   var merged = {
     meta: incoming.meta || currentState.meta,
     locations: currentState.locations,
@@ -218,25 +219,53 @@ function mergeStateForAccess_(currentState, incomingPayload, access, context) {
   if (access.role === "manager") {
     var allowedLocations = access.managedLocationIds || [];
     var scopedEmployeeIds = scopedEmployeeIds_(mergeEmployeesForLocations_(currentState.employees, incoming.employees || [], allowedLocations), allowedLocations);
-    merged.employees = mergeEmployeesForLocations_(currentState.employees, incoming.employees || [], allowedLocations);
-    merged.shifts = mergeShiftsForLocations_(currentState.shifts, incoming.shifts || [], allowedLocations);
-    merged.requests = mergeRequestsForEmployees_(
-      currentState.requests,
-      incoming.requests || [],
-      scopedEmployeeIds
-    );
-    merged.users = mergeUsersForAccess_(currentState.users, incoming.users || [], access, scopedEmployeeIds);
+    if (isScheduleAction_(actionType)) {
+      merged.shifts = mergeShiftsForLocations_(currentState.shifts, incoming.shifts || [], allowedLocations);
+    }
+    if (isEmployeeAction_(actionType) || isProfileAction_(actionType)) {
+      merged.employees = mergeEmployeesForLocations_(currentState.employees, incoming.employees || [], allowedLocations);
+    }
+    if (isRequestAction_(actionType)) {
+      merged.requests = mergeRequestsForEmployees_(
+        currentState.requests,
+        incoming.requests || [],
+        scopedEmployeeIds
+      );
+    }
+    if (actionType === "employee_and_user_created" || actionType === "user_created" || isProfileAction_(actionType)) {
+      merged.users = mergeUsersForAccess_(currentState.users, incoming.users || [], access, scopedEmployeeIds);
+    }
     return merged;
   }
 
   if (access.role === "employee") {
-    merged.employees = mergeEmployeeSelf_(currentState.employees, incoming.employees || [], access.employeeId);
-    merged.requests = mergeRequestsForEmployees_(currentState.requests, incoming.requests || [], [access.employeeId]);
-    merged.users = mergeUsersForAccess_(currentState.users, incoming.users || [], access, [access.employeeId]);
+    if (isProfileAction_(actionType)) {
+      merged.employees = mergeEmployeeSelf_(currentState.employees, incoming.employees || [], access.employeeId);
+      merged.users = mergeUsersForAccess_(currentState.users, incoming.users || [], access, [access.employeeId]);
+    }
+    if (isRequestAction_(actionType)) {
+      merged.requests = mergeRequestsForEmployees_(currentState.requests, incoming.requests || [], [access.employeeId]);
+    }
     return merged;
   }
 
   return incomingPayload;
+}
+
+function isScheduleAction_(type) {
+  return ["shift_draft_updated", "schedule_submitted", "schedule_approved", "schedule_rejected"].indexOf(type) !== -1;
+}
+
+function isEmployeeAction_(type) {
+  return ["employee_created", "employee_and_user_created", "employee_updated", "employee_removed"].indexOf(type) !== -1;
+}
+
+function isRequestAction_(type) {
+  return ["employee_request_created", "request_status_changed"].indexOf(type) !== -1;
+}
+
+function isProfileAction_(type) {
+  return type === "profile_or_availability_updated";
 }
 
 function isAllowedNonAdminAction_(type) {
@@ -574,8 +603,11 @@ function notifyByContext_(payload, context) {
     sendEmailList_(
       requestManagers,
       "New employee request",
-      "<p><strong>" + safe_(requestEmployee.name) + "</strong> submitted a " + safe_(formatRequestType_(context.requestType)) + " request.</p>" +
-        "<p>Review it in Botte Scheduling.</p>"
+      buildEmailShell_(
+        "New employee request",
+        "<p><strong>" + safe_(requestEmployee.name) + "</strong> submitted a " + safe_(formatRequestType_(context.requestType)) + " request.</p>" +
+          "<p>Review it in Botte Scheduling.</p>"
+      )
     );
     return;
   }
@@ -586,8 +618,11 @@ function notifyByContext_(payload, context) {
     sendEmailList_(
       availabilityManagers,
       "Employee profile or availability updated",
-      "<p><strong>" + safe_(availabilityEmployee.name) + "</strong> updated profile or availability information.</p>" +
-        "<p>Open the employee record or requests inbox to review the latest changes.</p>"
+      buildEmailShell_(
+        "Profile or availability updated",
+        "<p><strong>" + safe_(availabilityEmployee.name) + "</strong> updated profile or availability information.</p>" +
+          "<p>Open the employee record or requests inbox to review the latest changes.</p>"
+      )
     );
     return;
   }
@@ -597,10 +632,13 @@ function notifyByContext_(payload, context) {
     sendEmailList_(
       settingsRecipients,
       "Restaurant settings updated",
-      "<p>Restaurant service settings were updated in Botte Scheduling.</p>" +
-        "<p>Locations: " + safe_((context.locationIds || []).map(function (id) {
-          return findLocationName_(locations, id);
-        }).join(", ")) + "</p>"
+      buildEmailShell_(
+        "Restaurant settings updated",
+        "<p>Restaurant service settings were updated in Botte Scheduling.</p>" +
+          "<p>Locations: " + safe_((context.locationIds || []).map(function (id) {
+            return findLocationName_(locations, id);
+          }).join(", ")) + "</p>"
+      )
     );
     return;
   }
@@ -611,10 +649,13 @@ function notifyByContext_(payload, context) {
     sendEmailList_(
       [employee.email],
       "Request " + safe_(capitalizeText_(context.status)),
-      "<p>Your " + safe_(formatRequestType_(request.type)) + " request has been <strong>" + safe_(context.status) + "</strong>.</p>" +
-        "<p><strong>Dates:</strong> " + safe_(request.startDate || "Open") +
-        (request.endDate ? " to " + safe_(request.endDate) : "") + "</p>" +
-        "<p>" + safe_(request.note || "") + "</p>"
+      buildEmailShell_(
+        "Request " + safe_(capitalizeText_(context.status)),
+        "<p>Your " + safe_(formatRequestType_(request.type)) + " request has been <strong>" + safe_(context.status) + "</strong>.</p>" +
+          "<p><strong>Dates:</strong> " + safe_(request.startDate || "Open") +
+          (request.endDate ? " to " + safe_(request.endDate) : "") + "</p>" +
+          "<p>" + safe_(request.note || "") + "</p>"
+      )
     );
     return;
   }
@@ -624,7 +665,10 @@ function notifyByContext_(payload, context) {
     sendEmailList_(
       admins,
       "Schedule waiting for approval",
-      buildScheduleEmailHtml_(payload, context, "A manager submitted a weekly plan for approval.")
+      buildEmailShell_(
+        "Schedule waiting for approval",
+        buildScheduleEmailHtml_(payload, context, "A manager submitted a weekly plan for approval.")
+      )
     );
     return;
   }
@@ -634,7 +678,10 @@ function notifyByContext_(payload, context) {
     sendEmailList_(
       managersAndAdmins,
       "Schedule approved and live",
-      buildScheduleEmailHtml_(payload, context, "The weekly plan has been approved and is now live.")
+      buildEmailShell_(
+        "Schedule approved and live",
+        buildScheduleEmailHtml_(payload, context, "The weekly plan has been approved and is now live.")
+      )
     );
     sendEmployeeScheduleEmails_(payload, context);
     return;
@@ -645,8 +692,11 @@ function notifyByContext_(payload, context) {
     sendEmailList_(
       recipients,
       "Schedule rejected",
-      buildScheduleEmailHtml_(payload, context, "The weekly plan was rejected.") +
-        "<p><strong>Reason:</strong> " + safe_(context.reason || "No reason provided.") + "</p>"
+      buildEmailShell_(
+        "Schedule rejected",
+        buildScheduleEmailHtml_(payload, context, "The weekly plan was rejected.") +
+          "<p><strong>Reason:</strong> " + safe_(context.reason || "No reason provided.") + "</p>"
+      )
     );
   }
 }
@@ -667,7 +717,10 @@ function sendEmployeeScheduleEmails_(payload, context) {
     var totalHours = shifts.reduce(function (sum, shift) {
       return sum + calculateHours_(shift.start, shift.end);
     }, 0);
-    var html = buildEmployeeWeeklyScheduleHtml_(payload, context, employee, shifts, totalHours);
+    var html = buildEmailShell_(
+      "Your weekly schedule",
+      buildEmployeeWeeklyScheduleHtml_(payload, context, employee, shifts, totalHours)
+    );
     sendEmailList_([employee.email], "Your weekly schedule", html);
   });
 }
@@ -768,10 +821,16 @@ function sendEmailList_(emails, subject, htmlBody) {
   if (!recipients.length) {
     return;
   }
-  MailApp.sendEmail({
-    to: recipients.join(","),
-    subject: subject,
-    htmlBody: htmlBody,
+  recipients.forEach(function (recipient) {
+    MailApp.sendEmail(
+      recipient,
+      subject,
+      htmlToPlainText_(htmlBody),
+      {
+        htmlBody: htmlBody,
+        name: "Botte Scheduling",
+      }
+    );
   });
 }
 
@@ -834,4 +893,25 @@ function formatRequestType_(value) {
 function formatDateLabel_(isoDate) {
   var date = new Date(isoDate + "T12:00:00");
   return Utilities.formatDate(date, Session.getScriptTimeZone(), "EEE MMM d");
+}
+
+function buildEmailShell_(title, bodyHtml) {
+  return '<div style="margin:0;padding:32px;background:#f6f1eb;font-family:Arial,sans-serif;color:#241d18;">' +
+    '<div style="max-width:680px;margin:0 auto;background:#fffdf9;border:1px solid #e7ddd0;border-radius:18px;overflow:hidden;">' +
+    '<div style="padding:22px 28px;background:#6f202d;color:#fff7f2;">' +
+    '<div style="font-size:12px;letter-spacing:0.18em;text-transform:uppercase;opacity:0.82;">Botte Scheduling</div>' +
+    '<div style="font-size:28px;line-height:1.1;font-weight:700;margin-top:8px;">' + safe_(title) + '</div>' +
+    '</div>' +
+    '<div style="padding:28px;line-height:1.65;font-size:15px;">' + bodyHtml + '</div>' +
+    '<div style="padding:18px 28px;border-top:1px solid #efe4d7;color:#746658;font-size:12px;">This message was sent automatically by Botte Scheduling.</div>' +
+    '</div>' +
+    '</div>';
+}
+
+function htmlToPlainText_(html) {
+  return String(html || "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
