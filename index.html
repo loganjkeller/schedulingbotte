@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
+    <section id="accessGate" class="access-gate"></section>
     <div class="app-shell">
       <aside class="sidebar">
         <div class="brand-block">
@@ -24,9 +25,12 @@
         </div>
 
         <section class="sidebar-card">
-          <label for="userSelect">Signed in as</label>
-          <select id="userSelect"></select>
+          <p class="eyebrow">Access</p>
+          <h3 id="accountName">Not signed in</h3>
           <p id="roleSummary" class="muted"></p>
+          <div class="inline-form top-gap">
+            <button id="logoutButton" class="ghost-button" type="button">Log out</button>
+          </div>
         </section>
 
         <nav id="navTabs" class="nav-tabs"></nav>

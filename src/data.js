@@ -280,6 +280,8 @@ export function createSeedState() {
     {
       id: "user-admin",
       name: "Logan Admin",
+      lastName: "Keller",
+      pin: "1111",
       email: "owner@botte.com",
       role: "admin",
       employeeId: "",
@@ -288,6 +290,8 @@ export function createSeedState() {
     {
       id: "user-manager-alessia",
       name: "Alessia Manager",
+      lastName: "Romano",
+      pin: "2020",
       email: "alessia@botte.com",
       role: "manager",
       employeeId: "emp-alessia",
@@ -296,6 +300,8 @@ export function createSeedState() {
     {
       id: "user-manager-marco",
       name: "Marco Manager",
+      lastName: "Silva",
+      pin: "3030",
       email: "marco@botte.com",
       role: "manager",
       employeeId: "emp-marco",
@@ -304,6 +310,8 @@ export function createSeedState() {
     {
       id: "user-employee-lena",
       name: "Lena Employee",
+      lastName: "Torres",
+      pin: "4040",
       email: "lena@botte.com",
       role: "employee",
       employeeId: "emp-lena",
@@ -312,6 +320,8 @@ export function createSeedState() {
     {
       id: "user-employee-sofia",
       name: "Sofia Employee",
+      lastName: "Haddad",
+      pin: "5050",
       email: "sofia@botte.com",
       role: "employee",
       employeeId: "emp-sofia",

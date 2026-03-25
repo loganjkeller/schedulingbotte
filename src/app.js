@@ -1,4 +1,5 @@
 import {
+  authenticateRemoteUser,
   createAppsScriptExample,
   fetchRemoteState,
   pingAppsScript,
@@ -6,8 +7,11 @@ import {
 } from "./googleAppsAdapter.js";
 import { cloneState, getWeekDates, loadState, resetState, saveState } from "./data.js";
 
+const SESSION_KEY = "botte-scheduling-session-v1";
+
 const state = {
   appData: loadState(),
+  session: loadSession(),
   currentUserId: null,
   currentView: "dashboard",
   lastSyncMessage: "Local demo mode active",
@@ -51,7 +55,9 @@ const pages = {
 };
 
 const el = {
-  userSelect: document.querySelector("#userSelect"),
+  accessGate: document.querySelector("#accessGate"),
+  appShell: document.querySelector(".app-shell"),
+  accountName: document.querySelector("#accountName"),
   navTabs: document.querySelector("#navTabs"),
   roleSummary: document.querySelector("#roleSummary"),
   pageTitle: document.querySelector("#pageTitle"),
@@ -61,6 +67,7 @@ const el = {
   viewRoot: document.querySelector("#viewRoot"),
   seedButton: document.querySelector("#seedButton"),
   exportButton: document.querySelector("#exportButton"),
+  logoutButton: document.querySelector("#logoutButton"),
 };
 
 init().catch((error) => {
@@ -69,23 +76,16 @@ init().catch((error) => {
 });
 
 async function init() {
-  state.currentUserId = state.appData.users[0]?.id ?? null;
-  await maybeHydrateFromRemote();
+  state.currentUserId = state.session?.userId ?? null;
+  await maybeHydrateFromRemoteWithSession();
   wireEvents();
   render();
 }
 
 function wireEvents() {
-  el.userSelect.addEventListener("change", (event) => {
-    state.currentUserId = event.target.value;
-    ensureVisibleView();
-    render();
-  });
-
   el.seedButton.addEventListener("click", () => {
     state.appData = resetState();
-    state.currentUserId = state.appData.users[0]?.id ?? null;
-    state.currentView = "dashboard";
+    clearSession();
     state.lastSyncMessage = "Demo data reset";
     render();
   });
@@ -99,11 +99,21 @@ function wireEvents() {
     link.click();
     URL.revokeObjectURL(url);
   });
+
+  el.logoutButton.addEventListener("click", () => {
+    clearSession();
+    render();
+  });
 }
 
 function render() {
+  if (!state.session) {
+    renderAccessGate();
+    return;
+  }
+  showAppShell();
   ensureVisibleView();
-  renderUserSelect();
+  renderAccountSummary();
   renderNav();
   renderHero();
   renderStats();
@@ -118,19 +128,52 @@ function ensureVisibleView() {
   }
 }
 
-function renderUserSelect() {
+function renderAccountSummary() {
   const currentUser = getCurrentUser();
-  el.userSelect.innerHTML = state.appData.users
-    .map(
-      (user) =>
-        `<option value="${user.id}" ${user.id === state.currentUserId ? "selected" : ""}>${user.name} · ${capitalize(user.role)}</option>`
-    )
-    .join("");
-
+  el.accountName.textContent = currentUser.name;
   const scope = currentUser.role === "employee"
     ? getEmployeeByUser(currentUser)?.locations.map(getLocationName).join(", ") || "No locations"
     : currentUser.managedLocationIds.map(getLocationName).join(", ");
   el.roleSummary.textContent = `${capitalize(currentUser.role)} access · ${scope}`;
+}
+
+function renderAccessGate() {
+  hideAppShell();
+  const backend = state.appData.meta.backend || {};
+  const backendLabel = backend.provider === "appsScript" ? "Google Sheets access mode" : "Local demo access mode";
+  el.accessGate.innerHTML = `
+    <div class="access-card">
+      <p class="eyebrow">Botte access</p>
+      <h1>Enter with last name and PIN</h1>
+      <p class="hero-copy">Roles are assigned from the backend. Managers get location-based access, employees see only their own schedule and profile.</p>
+      <div class="access-note">${backendLabel}</div>
+      <form id="accessForm" class="access-form">
+        <div class="form-field">
+          <label for="accessLastName">Last name</label>
+          <input id="accessLastName" autocomplete="family-name" placeholder="Romano" />
+        </div>
+        <div class="form-field">
+          <label for="accessPin">PIN</label>
+          <input id="accessPin" type="password" inputmode="numeric" placeholder="••••" />
+        </div>
+        <button type="submit" class="primary-button access-submit">Access workspace</button>
+      </form>
+      <p class="muted access-help">Demo credentials: `Keller / 1111`, `Romano / 2020`, `Torres / 4040`.</p>
+      <p id="accessMessage" class="access-message">${escapeHtml(state.lastSyncMessage || "")}</p>
+    </div>
+  `;
+
+  document.querySelector("#accessForm").addEventListener("submit", handleAccessLogin);
+}
+
+function showAppShell() {
+  el.accessGate.style.display = "none";
+  el.appShell.style.display = "grid";
+}
+
+function hideAppShell() {
+  el.accessGate.style.display = "grid";
+  el.appShell.style.display = "none";
 }
 
 function renderNav() {
@@ -869,6 +912,8 @@ function handleCreateEmployee(event) {
   state.appData.users.push({
     id: `user-${employee.id}`,
     name: employee.name,
+    lastName: getLastName(employee.name),
+    pin: "0000",
     email: employee.email,
     role: "employee",
     employeeId: employee.id,
@@ -945,7 +990,9 @@ function openEmployeeEdit(employeeId) {
     positionLabel: (nextPosition || "").trim(),
   });
   state.appData.users = state.appData.users.map((item) =>
-    item.employeeId === employeeId ? { ...item, name: nextName.trim(), email: (nextEmail || "").trim() } : item
+    item.employeeId === employeeId
+      ? { ...item, name: nextName.trim(), lastName: getLastName(nextName.trim()), email: (nextEmail || "").trim() }
+      : item
   );
   persistAndRender("Employee updated");
 }
@@ -955,6 +1002,35 @@ function saveBackendSettings() {
   state.appData.meta.backend.appsScriptUrl = document.querySelector("#appsScriptUrl").value.trim();
   state.appData.meta.backend.sheetId = document.querySelector("#sheetId").value.trim();
   persistAndRender(`Saved backend mode: ${state.appData.meta.backend.provider}`);
+}
+
+async function handleAccessLogin(event) {
+  event.preventDefault();
+  const lastName = document.querySelector("#accessLastName").value.trim();
+  const pin = document.querySelector("#accessPin").value.trim();
+
+  if (!lastName || !pin) {
+    state.lastSyncMessage = "Enter last name and PIN.";
+    renderAccessGate();
+    return;
+  }
+
+  try {
+    const authenticatedUser = await authenticateUser(lastName, pin);
+    saveSession({
+      userId: authenticatedUser.id,
+      email: authenticatedUser.email,
+      role: authenticatedUser.role,
+      lastName: authenticatedUser.lastName,
+    });
+    state.currentUserId = authenticatedUser.id;
+    state.currentView = "dashboard";
+    state.lastSyncMessage = `Access granted for ${authenticatedUser.name}`;
+    render();
+  } catch (error) {
+    state.lastSyncMessage = error.message;
+    renderAccessGate();
+  }
 }
 
 async function testHealthcheck() {
@@ -971,17 +1047,22 @@ async function testHealthcheck() {
   }
 }
 
-async function maybeHydrateFromRemote() {
+async function maybeHydrateFromRemoteWithSession() {
   const backend = state.appData.meta.backend;
-  const currentUser = getCurrentUser();
-  if (backend.provider !== "appsScript" || !backend.appsScriptUrl || !currentUser?.email) {
+  const session = state.session;
+  if (backend.provider !== "appsScript" || !backend.appsScriptUrl || !session?.email) {
     return;
   }
-  const remoteData = await fetchRemoteState(backend.appsScriptUrl, currentUser.email);
+  const remoteData = await fetchRemoteState(backend.appsScriptUrl, session.email);
   state.appData = mergeBackendConfig(remoteData, backend);
   saveState(state.appData);
-  state.currentUserId = state.appData.users.find((user) => user.email === currentUser.email)?.id ?? state.appData.users[0]?.id ?? null;
-  state.lastSyncMessage = `Loaded remote data for ${currentUser.email}`;
+  state.currentUserId = state.appData.users.find((user) => user.email === session.email)?.id ?? null;
+  if (!state.currentUserId) {
+    clearSession();
+    state.lastSyncMessage = "Access session expired. Please log in again.";
+  } else {
+    state.lastSyncMessage = `Loaded remote data for ${session.email}`;
+  }
 }
 
 async function loadFromRemote() {
@@ -1111,6 +1192,47 @@ function mergeBackendConfig(remoteData, backend) {
     sheetId: backend.sheetId,
   };
   return next;
+}
+
+async function authenticateUser(lastName, pin) {
+  const backend = state.appData.meta.backend;
+  if (backend.provider === "appsScript" && backend.appsScriptUrl) {
+    const result = await authenticateRemoteUser(backend.appsScriptUrl, lastName, pin);
+    state.appData = mergeBackendConfig(result.data, backend);
+    saveState(state.appData);
+    return state.appData.users.find((user) => user.id === result.user.id) || result.user;
+  }
+
+  const user = state.appData.users.find(
+    (item) =>
+      String(item.lastName || "").toLowerCase() === lastName.toLowerCase() &&
+      String(item.pin || "") === pin
+  );
+
+  if (!user) {
+    throw new Error("Access denied. Check last name and PIN.");
+  }
+
+  return user;
+}
+
+function loadSession() {
+  try {
+    return JSON.parse(localStorage.getItem(SESSION_KEY) || "null");
+  } catch {
+    return null;
+  }
+}
+
+function saveSession(session) {
+  state.session = session;
+  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+}
+
+function clearSession() {
+  state.session = null;
+  state.currentUserId = null;
+  localStorage.removeItem(SESSION_KEY);
 }
 
 function getVisiblePages() {
@@ -1254,6 +1376,11 @@ function slugify(value) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
+}
+
+function getLastName(fullName) {
+  const parts = String(fullName || "").trim().split(/\s+/);
+  return parts[parts.length - 1] || "";
 }
 
 function escapeHtml(value) {

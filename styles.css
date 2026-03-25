@@ -41,6 +41,55 @@ textarea {
   font: inherit;
 }
 
+.access-gate {
+  min-height: 100vh;
+  display: none;
+  place-items: center;
+  padding: 24px;
+}
+
+.access-card {
+  width: min(560px, 100%);
+  padding: 34px;
+  border-radius: 28px;
+  background:
+    linear-gradient(180deg, rgba(255, 252, 247, 0.98), rgba(255, 248, 240, 0.95));
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+.access-card h1 {
+  font-size: 2.5rem;
+  line-height: 0.96;
+  margin-bottom: 12px;
+}
+
+.access-form {
+  display: grid;
+  gap: 14px;
+  margin: 22px 0 12px;
+}
+
+.access-note {
+  display: inline-flex;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  margin-top: 14px;
+  font-size: 0.88rem;
+}
+
+.access-submit {
+  justify-content: center;
+}
+
+.access-help,
+.access-message {
+  margin-top: 10px;
+  line-height: 1.5;
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: 260px 1fr;
@@ -516,6 +565,10 @@ textarea {
   .main-content,
   .sidebar {
     padding: 16px;
+  }
+
+  .access-card {
+    padding: 24px;
   }
 
   .hero {

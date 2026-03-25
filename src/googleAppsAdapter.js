@@ -43,6 +43,20 @@ export async function fetchRemoteState(url, userEmail) {
   return result.data;
 }
 
+export async function authenticateRemoteUser(url, lastName, pin) {
+  const result = await postJson(url, {
+    action: "authenticate",
+    lastName,
+    pin,
+  });
+
+  if (!result.ok) {
+    throw new Error(result.error || "Unable to authenticate");
+  }
+
+  return result;
+}
+
 export async function syncRemoteState(url, state, userEmail) {
   const result = await postJson(url, {
     action: "syncAll",
@@ -69,6 +83,7 @@ export function buildAppsScriptPayload(state) {
       templates: state.templates,
       locationSettings: state.locationSettings,
       users: state.users,
+      requests: state.requests,
     },
   };
 }

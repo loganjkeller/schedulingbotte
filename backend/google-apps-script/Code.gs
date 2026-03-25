@@ -19,7 +19,7 @@ var SHEET_CONFIG = {
   shifts: ["id", "date", "locationId", "employeeId", "roleId", "start", "end", "status", "notes"],
   templates: ["id", "name", "locationIds", "demandLevel", "roles"],
   locationSettings: ["locationId", "weekStartsOn", "publishCutoffHours", "overtimeWarningHours", "approvalRequired"],
-  users: ["id", "name", "email", "role", "employeeId", "managedLocationIds"],
+  users: ["id", "name", "lastName", "pin", "email", "role", "employeeId", "managedLocationIds"],
   requests: ["id", "employeeId", "type", "status", "startDate", "endDate", "scope", "note", "createdAt"],
 };
 
@@ -48,6 +48,15 @@ function doPost(e) {
     if (action === "getState") {
       var access = getUserAccess_(request.userEmail);
       return jsonResponse_({ ok: true, data: buildStateForUser_(access) });
+    }
+
+    if (action === "authenticate") {
+      var authenticated = authenticateUser_(request.lastName, request.pin);
+      return jsonResponse_({
+        ok: true,
+        user: sanitizeUser_(authenticated),
+        data: buildStateForUser_(authenticated),
+      });
     }
 
     if (action === "syncAll") {
@@ -195,6 +204,23 @@ function getUserAccess_(email) {
   return user;
 }
 
+function authenticateUser_(lastName, pin) {
+  if (!lastName || !pin) {
+    throw new Error("Missing last name or PIN.");
+  }
+
+  var users = readRows_(SpreadsheetApp.getActiveSpreadsheet().getSheetByName("users"), SHEET_CONFIG.users);
+  var user = users.filter(function (row) {
+    return String(row.lastName || "").toLowerCase() === String(lastName).toLowerCase() && String(row.pin || "") === String(pin);
+  })[0];
+
+  if (!user) {
+    throw new Error("Access denied. Check last name and PIN.");
+  }
+
+  return user;
+}
+
 function ensureSheet_(spreadsheet, sheetName, headers) {
   var sheet = spreadsheet.getSheetByName(sheetName);
   if (!sheet) {
@@ -331,4 +357,16 @@ function intersects_(list, allowedLocations) {
   return values.some(function (value) {
     return allowedLocations.indexOf(value) !== -1;
   });
+}
+
+function sanitizeUser_(user) {
+  return {
+    id: user.id,
+    name: user.name,
+    lastName: user.lastName,
+    email: user.email,
+    role: user.role,
+    employeeId: user.employeeId,
+    managedLocationIds: user.managedLocationIds || [],
+  };
 }
