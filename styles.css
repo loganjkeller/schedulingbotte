@@ -127,13 +127,13 @@ textarea {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  grid-template-columns: 210px 1fr;
   min-height: 100vh;
 }
 
 .sidebar {
-  padding: 22px 18px;
-  background: rgba(251, 247, 241, 0.76);
+  padding: 18px 14px;
+  background: rgba(251, 247, 241, 0.58);
   border-right: 1px solid rgba(217, 202, 183, 0.65);
   backdrop-filter: blur(18px);
   display: flex;
@@ -145,7 +145,7 @@ textarea {
 }
 
 .brand-block {
-  padding-right: 10px;
+  padding: 4px 6px 10px;
 }
 
 .eyebrow {
@@ -184,8 +184,7 @@ h2 {
 }
 
 .sidebar-copy {
-  max-width: 180px;
-  line-height: 1.45;
+  display: none;
 }
 
 .sidebar-card,
@@ -203,12 +202,13 @@ h2 {
 }
 
 .sidebar-card {
-  padding: 14px;
-  background: rgba(255, 253, 249, 0.72);
+  padding: 12px;
+  background: rgba(255, 253, 249, 0.54);
 }
 
 .sidebar-footer {
   margin-top: auto;
+  display: none;
 }
 
 label {
@@ -246,15 +246,15 @@ textarea {
 
 .nav-tabs {
   display: grid;
-  gap: 6px;
+  gap: 4px;
 }
 
 .nav-tab {
   border: 0;
   background: transparent;
   text-align: left;
-  padding: 10px 12px;
-  border-radius: 14px;
+  padding: 9px 10px;
+  border-radius: 12px;
   cursor: pointer;
   color: var(--text);
   transition: background 140ms ease, transform 140ms ease;
@@ -273,15 +273,15 @@ textarea {
 }
 
 .main-content {
-  padding: 24px 26px 34px;
+  padding: 18px 20px 28px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 
 .hero {
-  padding: 18px 22px;
-  border-radius: 20px;
+  padding: 14px 18px;
+  border-radius: 18px;
   background:
     linear-gradient(135deg, rgba(255, 250, 244, 0.96), rgba(255, 246, 237, 0.92)),
     linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.35));
@@ -294,14 +294,18 @@ textarea {
 }
 
 .hero h2 {
-  font-size: 2rem;
-  margin-bottom: 4px;
+  font-size: 1.7rem;
+  margin-bottom: 2px;
 }
 
 .hero-copy {
-  max-width: 520px;
-  line-height: 1.45;
-  font-size: 0.95rem;
+  max-width: 460px;
+  line-height: 1.35;
+  font-size: 0.9rem;
+}
+
+.hero .eyebrow {
+  display: none;
 }
 
 .hero-actions,
@@ -386,6 +390,7 @@ textarea {
 
 .stats-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .summary-grid,
@@ -411,7 +416,7 @@ textarea {
 
 .view-root {
   display: grid;
-  gap: 14px;
+  gap: 12px;
 }
 
 .panel,
@@ -421,12 +426,12 @@ textarea {
 .list-card,
 .schedule-card,
 .alert-card {
-  padding: 16px;
+  padding: 14px;
 }
 
 .panel {
-  background: rgba(255, 253, 250, 0.84);
-  box-shadow: var(--shadow);
+  background: rgba(255, 253, 250, 0.78);
+  box-shadow: 0 10px 28px rgba(54, 37, 24, 0.04);
 }
 
 .panel-header,
@@ -435,12 +440,12 @@ textarea {
   justify-content: space-between;
   align-items: flex-start;
   gap: 14px;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
 
 .stat-card {
-  background: rgba(255, 255, 255, 0.65);
-  min-height: 122px;
+  background: rgba(255, 255, 255, 0.55);
+  min-height: 104px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -453,8 +458,8 @@ textarea {
 }
 
 .stat-value {
-  margin: 8px 0;
-  font-size: 2.1rem;
+  margin: 6px 0;
+  font-size: 1.9rem;
   line-height: 1;
   font-weight: 800;
 }
@@ -467,7 +472,7 @@ textarea {
 .list-card,
 .employee-card,
 .schedule-card {
-  background: var(--paper);
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .pill,
@@ -503,14 +508,15 @@ textarea {
 
 .alerts {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .alert-card {
-  background: rgba(255, 252, 247, 0.85);
+  background: rgba(255, 252, 247, 0.72);
   box-shadow: none;
   position: relative;
   overflow: hidden;
+  padding: 12px 14px;
 }
 
 .alert-card::before {
@@ -532,7 +538,7 @@ textarea {
 .shift-stack,
 .compact-list {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .shift-card {
@@ -556,10 +562,20 @@ textarea {
 .empty-inline {
   border: 1px dashed var(--line-strong);
   border-radius: 16px;
-  padding: 18px;
+  padding: 14px;
   text-align: center;
   color: var(--muted);
   background: rgba(255, 255, 255, 0.4);
+}
+
+.summary-card h3,
+.panel h3 {
+  font-size: 1.2rem;
+}
+
+.list-card strong,
+.summary-card strong {
+  font-size: 1rem;
 }
 
 .code-card pre {

@@ -313,14 +313,17 @@ function renderDashboardView() {
   const visibleEmployees = getScopedEmployees(user);
   const visibleShifts = getScopedShifts(user);
   const pendingRequests = getScopedRequests(user).filter((request) => request.status === "pending");
+  const todaysShifts = visibleShifts
+    .filter((shift) => shift.date === getWeekDates()[0])
+    .slice(0, 6);
   const locationCards = getScopedLocations(user)
     .map((location) => {
       const locationShifts = visibleShifts.filter((shift) => shift.locationId === location.id);
       const hours = locationShifts.reduce((total, shift) => total + calculateHours(shift.start, shift.end), 0);
       return `<article class="summary-card">
-        <p class="eyebrow">${location.city}</p>
         <h3>${location.name}</h3>
-        <p class="muted">${locationShifts.length} shifts · ${hours.toFixed(1)} hours</p>
+        <p class="muted">${locationShifts.length} shifts</p>
+        <p class="kpi-note">${hours.toFixed(1)} hours</p>
       </article>`;
     })
     .join("");
@@ -329,8 +332,7 @@ function renderDashboardView() {
     <section class="panel">
       <div class="panel-header">
         <div>
-          <h3>Operations overview</h3>
-          <p class="muted">A cleaner high-level dashboard for labor, staffing, and requests.</p>
+          <h3>Overview</h3>
         </div>
         ${renderHelpButton("Managers can see only their locations. Admin sees everything. Use this page to quickly spot staffing gaps and pending employee requests.")}
       </div>
@@ -343,22 +345,28 @@ function renderDashboardView() {
         <div class="panel-header">
           <div>
             <h3>Pending requests</h3>
-            <p class="muted">Time-off, availability, and help requests waiting for review.</p>
           </div>
         </div>
         <div class="list-grid">
-          ${pendingRequests.slice(0, 6).map(renderRequestCard).join("") || renderInlineEmpty("No pending requests right now.")}
+          ${pendingRequests.slice(0, 4).map(renderRequestCard).join("") || renderInlineEmpty("No pending requests.")}
         </div>
       </article>
       <article class="panel">
         <div class="panel-header">
           <div>
-            <h3>People snapshot</h3>
-            <p class="muted">Track who is active across your restaurants.</p>
+            <h3>Today</h3>
           </div>
         </div>
         <div class="list-grid compact-list">
-          ${visibleEmployees.slice(0, 6).map(renderEmployeeListCard).join("")}
+          ${todaysShifts.length
+            ? todaysShifts.map((shift) => {
+                const employee = getEmployee(shift.employeeId);
+                return `<article class="list-card">
+                  <strong>${employee?.name || "Unknown"}</strong>
+                  <p class="muted">${getLocationName(shift.locationId)} · ${shift.start} - ${shift.end}</p>
+                </article>`;
+              }).join("")
+            : visibleEmployees.slice(0, 4).map(renderEmployeeListCard).join("")}
         </div>
       </article>
     </section>
