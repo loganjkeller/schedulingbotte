@@ -389,9 +389,8 @@ textarea {
 .form-grid,
 .filter-bar,
 .schedule-board,
-.schedule-layout,
-.staff-list,
-.service-strip {
+.service-strip,
+.employee-week-grid {
   display: grid;
   gap: 14px;
 }
@@ -422,13 +421,8 @@ textarea {
   overflow-x: auto;
 }
 
-.schedule-layout {
-  grid-template-columns: 280px 1fr;
-  align-items: start;
-}
-
 .service-strip {
-  grid-template-columns: repeat(2, max-content);
+  grid-template-columns: repeat(auto-fit, max-content);
   gap: 10px;
   margin-bottom: 4px;
 }
@@ -443,14 +437,22 @@ textarea {
   font-size: 0.84rem;
 }
 
-.employee-bank {
-  position: sticky;
-  top: 12px;
-  align-self: start;
+.accent-service {
+  background: var(--accent-soft);
+  color: var(--accent-deep);
 }
 
-.staff-list {
-  gap: 10px;
+.planner-strip {
+  margin: 10px 0 16px;
+}
+
+.staff-scroll {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 240px;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 8px;
 }
 
 .staff-card {
@@ -469,6 +471,15 @@ textarea {
   margin: 10px 0 0;
   color: var(--accent-deep);
   font-size: 0.88rem;
+}
+
+.wide-board {
+  grid-template-columns: repeat(7, minmax(240px, 1fr));
+}
+
+.employee-week-grid {
+  grid-template-columns: repeat(7, minmax(220px, 1fr));
+  overflow-x: auto;
 }
 
 .view-root {
@@ -604,7 +615,7 @@ textarea {
 }
 
 .dropzone {
-  min-height: 160px;
+  min-height: 220px;
   padding: 4px;
   border-radius: 12px;
   transition: background 140ms ease, border-color 140ms ease;
@@ -616,6 +627,39 @@ textarea {
 
 .compact-header {
   margin-bottom: 10px;
+}
+
+.service-section {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.section-label {
+  margin: 0;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.coworker-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.coworker-line.is-self {
+  background: var(--accent-soft);
+  border-color: #e8ccb7;
+}
+
+.employee-day-card {
+  min-width: 220px;
 }
 
 .stack-list {
@@ -711,11 +755,8 @@ textarea {
     grid-template-columns: 1fr;
   }
 
-  .schedule-layout {
+  .wide-board,
+  .employee-week-grid {
     grid-template-columns: 1fr;
-  }
-
-  .employee-bank {
-    position: static;
   }
 }

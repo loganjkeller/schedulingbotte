@@ -30,8 +30,8 @@ const pages = {
   },
   schedule: {
     title: "Scheduling",
-    subtitle: "Build the week, copy last week, publish shifts, and keep each location covered.",
-    roles: ["admin", "manager"],
+    subtitle: "Build the week and review service coverage.",
+    roles: ["admin", "manager", "employee"],
   },
   people: {
     title: "Team Management",
@@ -190,6 +190,10 @@ function renderHero() {
 }
 
 function renderStats() {
+  if (state.currentView !== "dashboard") {
+    el.statsGrid.innerHTML = "";
+    return;
+  }
   const stats = buildStatsForUser(getCurrentUser());
   el.statsGrid.innerHTML = stats
     .map(
@@ -203,6 +207,10 @@ function renderStats() {
 }
 
 function renderAlerts() {
+  if (state.currentView !== "dashboard") {
+    el.alerts.innerHTML = "";
+    return;
+  }
   const alerts = buildAlerts();
   el.alerts.innerHTML = alerts
     .map(
@@ -355,6 +363,10 @@ function renderDashboardView() {
 
 function renderScheduleView() {
   const user = getCurrentUser();
+  if (user.role === "employee") {
+    renderEmployeeScheduleView(user);
+    return;
+  }
   const weekDates = getWeekDates(state.weekStartDate);
   const locationOptions = getScopedLocations(user);
   if (state.filters.locationId === "all" && locationOptions[0]) {
@@ -400,21 +412,19 @@ function renderScheduleView() {
         <span class="service-pill">Lunch ${activeLocationSetting?.lunchOpen || "--:--"} - ${activeLocationSetting?.lunchClose || "--:--"}</span>
         <span class="service-pill">Dinner ${activeLocationSetting?.dinnerOpen || "--:--"} - ${activeLocationSetting?.dinnerClose || "--:--"}</span>
       </div>
-      <div class="schedule-layout">
-        <aside class="employee-bank">
-          <div class="panel-header compact-header">
-            <div>
-              <h3>Available staff</h3>
-            </div>
-            ${renderHelpButton("Each card shows position, assigned hours, permanent availability, and pending requests. Drag a card into a day to create a draft shift.")}
+      <div class="planner-strip">
+        <div class="panel-header compact-header">
+          <div>
+            <h3>Available staff</h3>
           </div>
-          <div class="staff-list">
-            ${employeeOptions.map((employee) => renderStaffPlannerCard(employee, activeLocationId)).join("") || renderInlineEmpty("No employees for this location.")}
-          </div>
-        </aside>
-        <div class="schedule-board">
-          ${weekDates.map((date) => renderDayColumn(date, user, activeLocationId)).join("")}
+          ${renderHelpButton("Drag a staff card into a day to create a draft shift. Availability and pending changes stay visible on each card while you schedule.")}
         </div>
+        <div class="staff-scroll">
+          ${employeeOptions.map((employee) => renderStaffPlannerCard(employee, activeLocationId)).join("") || renderInlineEmpty("No employees for this location.")}
+        </div>
+      </div>
+      <div class="schedule-board wide-board">
+        ${weekDates.map((date) => renderDayColumn(date, user, activeLocationId)).join("")}
       </div>
     </section>
   `;
@@ -447,6 +457,62 @@ function renderScheduleView() {
     zone.addEventListener("drop", handleScheduleDrop);
   });
   bindHelpButtons();
+}
+
+function renderEmployeeScheduleView(user) {
+  const employee = getEmployeeByUser(user);
+  const weekDates = getWeekDates(state.weekStartDate);
+  const locationOptions = getScopedLocations(user);
+  if (state.filters.locationId === "all" && locationOptions[0]) {
+    state.filters.locationId = locationOptions[0].id;
+  }
+  const activeLocationId = state.filters.locationId === "all" ? locationOptions[0]?.id : state.filters.locationId;
+  const activeLocationSetting = state.appData.locationSettings.find((item) => item.locationId === activeLocationId);
+
+  el.viewRoot.innerHTML = `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <h3>Team schedule</h3>
+          <p class="muted">${formatWeekRange(weekDates[0], weekDates[6])}</p>
+        </div>
+        <div class="action-row">
+          <button type="button" class="ghost-button" id="prevWeekButton">Previous week</button>
+          <button type="button" class="ghost-button" id="nextWeekButton">Next week</button>
+        </div>
+      </div>
+      <div class="filter-bar">
+        <div class="form-field">
+          <label for="locationFilter">Location</label>
+          <select id="locationFilter">
+            ${locationOptions.map(renderLocationOption).join("")}
+          </select>
+        </div>
+      </div>
+      <div class="service-strip">
+        <span class="service-pill">Lunch ${activeLocationSetting?.lunchOpen || "--:--"} - ${activeLocationSetting?.lunchClose || "--:--"}</span>
+        <span class="service-pill">Dinner ${activeLocationSetting?.dinnerOpen || "--:--"} - ${activeLocationSetting?.dinnerClose || "--:--"}</span>
+        <span class="service-pill accent-service">You: ${employee.name}</span>
+      </div>
+      <div class="employee-week-grid">
+        ${weekDates.map((date) => renderEmployeeDayServiceCard(date, activeLocationId, activeLocationSetting, employee.id)).join("")}
+      </div>
+    </section>
+  `;
+
+  document.querySelector("#locationFilter").value = activeLocationId;
+  document.querySelector("#locationFilter").addEventListener("change", (event) => {
+    state.filters.locationId = event.target.value;
+    renderEmployeeScheduleView(user);
+  });
+  document.querySelector("#prevWeekButton").addEventListener("click", () => {
+    state.weekStartDate = addDaysToIso(state.weekStartDate, -7);
+    renderEmployeeScheduleView(user);
+  });
+  document.querySelector("#nextWeekButton").addEventListener("click", () => {
+    state.weekStartDate = addDaysToIso(state.weekStartDate, 7);
+    renderEmployeeScheduleView(user);
+  });
 }
 
 function renderPeopleView() {
@@ -748,6 +814,35 @@ function renderStaffPlannerCard(employee, activeLocationId) {
     <p class="muted">${employee.positionLabel || getRoleName(employee.roleId)}</p>
     <p class="kpi-note">Availability: ${(employee.availability || []).join(" · ") || "Not set"}</p>
     ${pendingAvailability ? `<p class="staff-note">Pending change: ${pendingAvailability.note}</p>` : ""}
+  </article>`;
+}
+
+function renderEmployeeDayServiceCard(date, locationId, locationSetting, employeeId) {
+  const shifts = state.appData.shifts.filter((shift) => shift.date === date && shift.locationId === locationId);
+  const lunchShifts = shifts.filter((shift) => isShiftInService(shift, locationSetting, "lunch"));
+  const dinnerShifts = shifts.filter((shift) => isShiftInService(shift, locationSetting, "dinner"));
+  const label = formatDate(date);
+  return `<article class="schedule-card employee-day-card">
+    <header>
+      <h3>${label.weekday}</h3>
+      <p class="muted">${label.fullDate}</p>
+    </header>
+    <div class="service-section">
+      <p class="section-label">Lunch</p>
+      ${lunchShifts.length ? lunchShifts.map((shift) => renderCoworkerLine(shift, employeeId)).join("") : renderInlineEmpty("No lunch shifts")}
+    </div>
+    <div class="service-section">
+      <p class="section-label">Dinner</p>
+      ${dinnerShifts.length ? dinnerShifts.map((shift) => renderCoworkerLine(shift, employeeId)).join("") : renderInlineEmpty("No dinner shifts")}
+    </div>
+  </article>`;
+}
+
+function renderCoworkerLine(shift, employeeId) {
+  const employee = getEmployee(shift.employeeId);
+  return `<article class="coworker-line ${shift.employeeId === employeeId ? "is-self" : ""}">
+    <strong>${employee?.name || "Unknown"}</strong>
+    <span>${shift.start} - ${shift.end}</span>
   </article>`;
 }
 
@@ -1499,6 +1594,22 @@ function formatWeekRange(startDate, endDate) {
   const startLabel = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(start);
   const endLabel = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(end);
   return `${startLabel} - ${endLabel}`;
+}
+
+function isShiftInService(shift, locationSetting, serviceKey) {
+  const openKey = serviceKey === "lunch" ? "lunchOpen" : "dinnerOpen";
+  const closeKey = serviceKey === "lunch" ? "lunchClose" : "dinnerClose";
+  const open = locationSetting?.[openKey];
+  const close = locationSetting?.[closeKey];
+  if (!open || !close) {
+    return true;
+  }
+  return timeToMinutes(shift.start) < timeToMinutes(close) && timeToMinutes(shift.end) > timeToMinutes(open);
+}
+
+function timeToMinutes(value) {
+  const [hours, minutes] = String(value || "00:00").split(":").map(Number);
+  return hours * 60 + minutes;
 }
 
 function escapeHtml(value) {
