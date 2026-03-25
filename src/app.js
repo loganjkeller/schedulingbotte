@@ -1906,7 +1906,11 @@ async function syncIfLive(context = {}) {
       ...context,
     });
     state.lastSyncMessage = "Live changes saved";
-    await refreshFromRemote({ silent: true, preserveMessage: true, force: true });
+    if (shouldForceRefreshAfterSync(context)) {
+      await refreshFromRemote({ silent: true, preserveMessage: true, force: true });
+    } else {
+      state.liveRefresh.lastSignature = getStateSignature(state.appData);
+    }
     renderAlerts();
   } catch (error) {
     state.lastSyncMessage = `Live sync failed: ${error.message}`;
@@ -2112,6 +2116,23 @@ function shouldPauseLiveRefresh() {
 
 function getStateSignature(appData) {
   return JSON.stringify(normalizeAppData(appData));
+}
+
+function shouldForceRefreshAfterSync(context = {}) {
+  return [
+    "employee_request_created",
+    "request_status_changed",
+    "schedule_submitted",
+    "schedule_approved",
+    "schedule_rejected",
+    "settings_updated",
+    "employee_and_user_created",
+    "employee_created",
+    "employee_updated",
+    "employee_removed",
+    "user_created",
+    "profile_or_availability_updated",
+  ].includes(context.type);
 }
 
 function mergeBackendConfig(remoteData, backend) {
