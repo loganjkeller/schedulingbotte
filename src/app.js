@@ -64,6 +64,8 @@ const pages = {
 const el = {
   accessGate: document.querySelector("#accessGate"),
   modalRoot: document.querySelector("#modalRoot"),
+  loadingOverlay: document.querySelector("#loadingOverlay"),
+  loadingLabel: document.querySelector("#loadingLabel"),
   appShell: document.querySelector(".app-shell"),
   accountName: document.querySelector("#accountName"),
   navTabs: document.querySelector("#navTabs"),
@@ -259,27 +261,40 @@ function renderAlerts() {
 }
 
 function renderView() {
-  switch (state.currentView) {
-    case "dashboard":
-      renderDashboardView();
-      break;
-    case "schedule":
-      renderScheduleView();
-      break;
-    case "people":
-      renderPeopleView();
-      break;
-    case "requests":
-      renderRequestsView();
-      break;
-    case "profile":
-      renderProfileView();
-      break;
-    case "settings":
-      renderSettingsView();
-      break;
-    default:
-      renderEmpty();
+  try {
+    switch (state.currentView) {
+      case "dashboard":
+        renderDashboardView();
+        break;
+      case "schedule":
+        renderScheduleView();
+        break;
+      case "people":
+        renderPeopleView();
+        break;
+      case "requests":
+        renderRequestsView();
+        break;
+      case "profile":
+        renderProfileView();
+        break;
+      case "settings":
+        renderSettingsView();
+        break;
+      default:
+        renderEmpty();
+    }
+  } catch (error) {
+    el.viewRoot.innerHTML = `
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h3>This page could not load</h3>
+            <p class="muted">${escapeHtml(error.message || "Unknown error")}</p>
+          </div>
+        </div>
+      </section>
+    `;
   }
 }
 
@@ -1605,6 +1620,7 @@ async function handleAccessLogin(event) {
   }
 
   try {
+    showLoading("Signing in...");
     const authenticatedUser = await authenticateUser(lastName, pin);
     saveSession({
       userId: authenticatedUser.id,
@@ -1619,6 +1635,8 @@ async function handleAccessLogin(event) {
   } catch (error) {
     state.lastSyncMessage = error.message;
     renderAccessGate();
+  } finally {
+    hideLoading();
   }
 }
 
@@ -1628,15 +1646,20 @@ async function maybeHydrateFromRemoteWithSession() {
   if (backend.provider !== "appsScript" || !backend.appsScriptUrl || !session?.email) {
     return;
   }
-  const remoteData = await fetchRemoteState(backend.appsScriptUrl, session.email);
-  state.appData = mergeBackendConfig(remoteData, backend);
-  saveState(state.appData);
-  state.currentUserId = state.appData.users.find((user) => user.email === session.email)?.id ?? null;
-  if (!state.currentUserId) {
-    clearSession();
-    state.lastSyncMessage = "Access session expired. Please log in again.";
-  } else {
-    state.lastSyncMessage = `Loaded remote data for ${session.email}`;
+  showLoading("Loading workspace...");
+  try {
+    const remoteData = await fetchRemoteState(backend.appsScriptUrl, session.email);
+    state.appData = mergeBackendConfig(remoteData, backend);
+    saveState(state.appData);
+    state.currentUserId = state.appData.users.find((user) => user.email === session.email)?.id ?? null;
+    if (!state.currentUserId) {
+      clearSession();
+      state.lastSyncMessage = "Access session expired. Please log in again.";
+    } else {
+      state.lastSyncMessage = `Loaded remote data for ${session.email}`;
+    }
+  } finally {
+    hideLoading();
   }
 }
 
@@ -1917,6 +1940,9 @@ async function syncIfLive(context = {}) {
   }
 
   try {
+    if (context.type !== "shift_draft_updated") {
+      showLoading("Saving changes...");
+    }
     await syncRemoteState(backend.appsScriptUrl, state.appData, currentUser.email, {
       actorEmail: currentUser.email,
       actorName: currentUser.name,
@@ -1933,6 +1959,8 @@ async function syncIfLive(context = {}) {
   } catch (error) {
     state.lastSyncMessage = `Live sync failed: ${error.message}`;
     renderAlerts();
+  } finally {
+    hideLoading();
   }
 }
 
@@ -2092,6 +2120,9 @@ async function refreshFromRemote({ silent = false, preserveMessage = false, forc
 
   state.liveRefresh.inFlight = true;
   try {
+    if (!silent) {
+      showLoading("Refreshing data...");
+    }
     const remoteData = await fetchRemoteState(backend.appsScriptUrl, session.email);
     const merged = mergeBackendConfig(remoteData, backend);
     const signature = getStateSignature(merged);
@@ -2123,6 +2154,9 @@ async function refreshFromRemote({ silent = false, preserveMessage = false, forc
       renderAlerts();
     }
   } finally {
+    if (!silent) {
+      hideLoading();
+    }
     state.liveRefresh.inFlight = false;
   }
 }
@@ -2140,6 +2174,23 @@ function shouldPauseLiveRefresh() {
 
 function getStateSignature(appData) {
   return JSON.stringify(normalizeAppData(appData));
+}
+
+function showLoading(label = "Working...") {
+  if (!el.loadingOverlay || !el.loadingLabel) {
+    return;
+  }
+  el.loadingLabel.textContent = label;
+  el.loadingOverlay.classList.add("is-visible");
+  el.loadingOverlay.setAttribute("aria-hidden", "false");
+}
+
+function hideLoading() {
+  if (!el.loadingOverlay) {
+    return;
+  }
+  el.loadingOverlay.classList.remove("is-visible");
+  el.loadingOverlay.setAttribute("aria-hidden", "true");
 }
 
 function shouldForceRefreshAfterSync(context = {}) {
@@ -2204,10 +2255,14 @@ async function authenticateUser(lastName, pin) {
 
 function normalizeAppData(appData) {
   const next = cloneState(appData);
+  next.meta = next.meta || {};
+  next.meta.backend = next.meta.backend || {};
+  next.locations = next.locations || [];
   next.roles = next.roles || [];
   next.users = next.users || [];
   next.employees = next.employees || [];
   next.requests = next.requests || [];
+  next.templates = next.templates || [];
   next.locationSettings = next.locationSettings || [];
   next.shifts = (next.shifts || []).map((shift) => ({
     ...shift,
